@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#16a571">
+<title>注册 · 班级助手</title>
+<link rel="stylesheet" href="/fonts/misans/MiSans-Regular.min.css">
+<link rel="stylesheet" href="/fonts/misans/MiSans-Bold.min.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 18px; color: #23324a;
+    font: 16px/1.6 MiSans, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: radial-gradient(900px 520px at -5% -10%, #d6f5e6 0, transparent 60%), radial-gradient(800px 480px at 105% 0%, #dcefff 0, transparent 60%), #f3faf7; }
+  .card { width: 100%; max-width: 420px; background: #fff; border-radius: 26px; padding: 30px 26px; box-shadow: 0 12px 32px rgba(35, 50, 74, .08); }
+  .logo { width: 64px; height: 64px; border-radius: 20px; margin: 0 auto 14px; display: grid; place-items: center; color: #fff;
+    background: linear-gradient(135deg, #34d399, #16a571); box-shadow: 0 8px 20px rgba(22, 165, 113, .3); }
+  h1 { margin: 0 0 4px; font-size: 22px; text-align: center; }
+  .lead { margin: 0 0 18px; color: #7a8699; text-align: center; font-size: 15px; }
+  label { display: block; font-weight: 700; font-size: 14px; margin: 14px 0 6px; }
+  .hint { font-weight: 400; color: #9aa6b5; font-size: 12.5px; margin-left: 4px; }
+  input { width: 100%; font: inherit; padding: 13px 15px; border: 1.5px solid #e6ecf2; border-radius: 14px; outline: none; }
+  input:focus { border-color: #16a571; box-shadow: 0 0 0 4px #e2f7ee; }
+  .sub { font-size: 12.5px; color: #9aa6b5; margin-top: 6px; }
+  .me { margin: 4px 0 0; padding: 10px 14px; border-radius: 14px; background: #e2f7ee; color: #128a5b; font-size: 14px; }
+  button { width: 100%; font: inherit; font-weight: 800; font-size: 18px; border: 0; border-radius: 16px; padding: 15px; margin-top: 20px; color: #fff; cursor: pointer;
+    background: linear-gradient(135deg, #16a571, #34d399); box-shadow: 0 8px 20px rgba(22, 165, 113, .3); }
+  button:disabled { opacity: .6; cursor: default; }
+  .err { color: #ef5a5a; min-height: 24px; margin-top: 10px; font-size: 14px; text-align: center; }
+  .privacy { margin-top: 18px; padding: 14px 16px; border-radius: 16px; background: #f6f8fa; font-size: 13px; color: #5d6b80; line-height: 1.75; }
+  .privacy b { color: #23324a; }
+  .privacy ul { margin: 6px 0 0; padding-left: 18px; }
+  .foot { text-align: center; font-size: 13px; color: #9aa6b5; margin-top: 14px; }
+  .foot a { color: #128a5b; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg></div>
+  <h1 id="title">建一个班</h1>
+  <p class="lead" id="lead">注册后你就是这个班的班主任，可以邀请任课老师一起用</p>
+  <div id="meBox"></div>
+  <label for="code">注册码<span class="hint">公众号自动回复里有</span></label>
+  <input id="code" maxlength="20" autocomplete="off" placeholder="注册码">
+  <div id="nameBox">
+    <label for="name">你的称呼<span class="hint">会显示在你发的每条消息上</span></label>
+    <input id="name" maxlength="20" placeholder="如：数学王老师">
+  </div>
+  <label for="cls">班级名称<span class="hint">最长 16 个字</span></label>
+  <input id="cls" maxlength="16" placeholder="如：阳光中学高一3班">
+  <div class="sub">请带上学校名，避免和别的学校重名</div>
+  <button id="go">注册并进入工作台</button>
+  <div class="err" id="err"></div>
+  <div class="privacy">
+    <b>隐私说明</b>
+    <ul>
+      <li>本服务由一位老师个人免费提供，数据存在国内的云服务器上。</li>
+      <li>学生名单建议只填学号或化名，不必填真实姓名。</li>
+      <li>班主任可以随时在工作台删除本班全部数据，删了就恢复不了。</li>
+      <li>作者不会查看、使用或分享各班的数据。</li>
+    </ul>
+  </div>
+  <div class="foot" id="foot">已经注册过？<a href="/">直接进入工作台</a></div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const token = (() => { try { return localStorage.getItem('cc_token') || ''; } catch { return ''; } })();
+const save = (t, n) => { try { if (t) localStorage.setItem('cc_token', t); localStorage.setItem('cc_name', n); } catch {} };
+let me = null;
+(async () => {
+  if (!token) return;
+  try { const r = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } }); if (r.ok) me = await r.json(); } catch {}
+  if (!me || me.admin) { me = null; return; }
+  $('#nameBox').style.display = 'none';
+  $('#title').textContent = '再建一个班';
+  $('#lead').textContent = '新班会加到你的工作台，你是这个班的班主任';
+  $('#meBox').innerHTML = `<div class="me">你已登录为 <b>${esc(me.name)}</b></div>`;
+  $('#foot').innerHTML = '<a href="/">返回工作台</a>';
+})();
+$('#go').onclick = async () => {
+  const body = { code: $('#code').value.trim(), name: me ? '' : $('#name').value.trim(), class: $('#cls').value.replace(/\s+/g, '') };
+  if (!body.code) return $('#err').textContent = '请填写注册码';
+  if (!me && !body.name) return $('#err').textContent = '请填写你的称呼';
+  if (!body.class) return $('#err').textContent = '请填写班级名称';
+  $('#go').disabled = true; $('#err').textContent = '';
+  try {
+    const res = await fetch('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify(body) });
+    const j = await res.json(); if (!res.ok) throw new Error(j.error || '注册失败');
+    save(j.token, j.name);
+    try { localStorage.setItem('cc_cls', j['class']); } catch {}
+    location.href = '/';
+  } catch (e) { $('#err').textContent = e.message; $('#go').disabled = false; }
+};
+document.querySelectorAll('input').forEach(i => i.onkeydown = e => { if (e.key === 'Enter') $('#go').click(); });
+</script>
+</body>
+</html>

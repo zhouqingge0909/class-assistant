@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>作业收交登记</title>
+<link rel="stylesheet" href="/fonts/misans/MiSans-Regular.min.css">
+<link rel="stylesheet" href="/fonts/misans/MiSans-Bold.min.css">
+<style>
+  :root { --text: #1d2b40; --muted: #7a8699; --line: #e3e9f0; --green: #1fb57a; --red: #ef5a5a; --blue: #3b9cf5; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body { margin: 0; height: 100%; color: var(--text); font-family: MiSans, "PingFang SC", "Noto Sans CJK SC", sans-serif; }
+  body { background: radial-gradient(900px 520px at -5% -10%, #d6f5e6 0, transparent 60%),
+                     radial-gradient(800px 480px at 105% 0%, #dcefff 0, transparent 60%), #f3faf7; }
+  button { font: inherit; color: inherit; cursor: pointer; border: 0; }
+  .hidden { display: none !important; }
+  header { display: flex; align-items: center; gap: 16px; padding: 18px 32px; }
+  header h1 { margin: 0; font-size: 30px; }
+  header .cls { font-size: 20px; color: var(--muted); }
+  header .sp { flex: 1; }
+  header .clock { font-size: 24px; font-weight: 700; color: var(--muted); }
+  .hbtn { padding: 12px 22px; border-radius: 14px; background: #fff; font-size: 18px; font-weight: 700; box-shadow: 0 4px 12px rgba(35, 50, 74, .06); }
+  main { padding: 6px 32px 32px; }
+  .tip { font-size: 22px; color: var(--muted); margin: 6px 0 18px; }
+  .hw-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 18px; }
+  .hw { background: #fff; border-radius: 24px; padding: 24px; text-align: left; box-shadow: 0 10px 28px rgba(35, 50, 74, .08); transition: transform .1s; }
+  .hw:active { transform: scale(.98); }
+  .hw .subj { display: inline-block; padding: 6px 16px; border-radius: 12px; font-weight: 800; font-size: 22px; }
+  .hw .ct { font-size: 24px; font-weight: 700; margin: 14px 0 10px; line-height: 1.4; }
+  .hw .when { display: block; font-size: 16px; font-weight: 500; color: var(--muted); margin-top: 6px; }
+  .hw .st { font-size: 18px; color: var(--muted); }
+  .hw .st b.ok { color: var(--green); } .hw .st b.no { color: var(--red); }
+  .bar { display: flex; align-items: center; gap: 16px; background: #fff; border-radius: 22px; padding: 16px 22px; margin-bottom: 18px;
+    box-shadow: 0 8px 22px rgba(35, 50, 74, .06); flex-wrap: wrap; }
+  .bar .subj { padding: 6px 14px; border-radius: 12px; font-weight: 800; font-size: 22px; }
+  .bar .ct { font-size: 22px; font-weight: 700; flex: 1; min-width: 200px; }
+  .count { font-size: 24px; font-weight: 800; white-space: nowrap; }
+  .count .ok { color: var(--green); } .count .no { color: var(--red); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+  .stu { height: 96px; border-radius: 20px; background: #fff; font-size: 28px; font-weight: 800; position: relative;
+    box-shadow: 0 6px 16px rgba(35, 50, 74, .07); border: 3px solid transparent; transition: all .1s; }
+  .stu:active { transform: scale(.96); }
+  .stu.miss { background: #fff0f0; border-color: var(--red); color: var(--red); }
+  .stu.miss::after { content: "未交"; position: absolute; top: 6px; right: 10px; font-size: 14px; background: var(--red); color: #fff; border-radius: 99px; padding: 1px 9px; }
+  .actions { position: sticky; bottom: 0; display: flex; gap: 16px; padding: 18px 0 4px; margin-top: 10px;
+    background: linear-gradient(to top, #f3faf7 70%, transparent); }
+  .big { flex: 1; padding: 24px; border-radius: 22px; font-size: 28px; font-weight: 800; }
+  .big.green { background: linear-gradient(135deg, #1fb57a, #34d399); color: #fff; box-shadow: 0 10px 24px rgba(31, 181, 122, .3); }
+  .big.white { background: #fff; flex: 0 0 auto; padding: 24px 34px; box-shadow: 0 6px 16px rgba(35, 50, 74, .07); }
+  .done { text-align: center; padding-top: 8vh; }
+  .done .ok { width: 120px; height: 120px; border-radius: 50%; margin: 0 auto 20px; display: grid; place-items: center; font-size: 64px; color: #fff;
+    background: linear-gradient(135deg, #1fb57a, #34d399); box-shadow: 0 12px 30px rgba(31, 181, 122, .35); }
+  .done h2 { font-size: 40px; margin: 0 0 10px; }
+  .done p { font-size: 24px; color: var(--muted); margin: 0 0 34px; }
+  .done .row { display: flex; gap: 16px; justify-content: center; }
+  .empty { text-align: center; font-size: 26px; color: var(--muted); padding: 12vh 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>作业收交登记</h1><span class="cls" id="cls"></span>
+  <span class="sp"></span>
+  <span class="clock" id="clock"></span>
+  <button class="hbtn" id="fsBtn">全屏</button>
+  <button class="hbtn" id="closeBtn">关闭</button>
+</header>
+<main>
+  <section id="pick">
+    <div class="tip">第 1 步：选择今天要交的作业</div>
+    <div class="hw-list" id="hwList"></div>
+  </section>
+
+  <section id="mark" class="hidden">
+    <div class="bar">
+      <span class="subj" id="mSubj"></span><span class="ct" id="mCt"></span>
+      <span class="count" id="mCount"></span>
+      <button class="hbtn" id="backBtn">换一项</button>
+    </div>
+    <div class="tip">第 2 步：点<b style="color:var(--red)">没交作业</b>的同学（再点一次取消）</div>
+    <div class="grid" id="grid"></div>
+    <div class="actions">
+      <button class="big white" id="allBtn">全部已交</button>
+      <button class="big green" id="saveBtn">提交登记</button>
+    </div>
+  </section>
+
+  <section id="done" class="hidden done">
+    <div class="ok">✓</div>
+    <h2>登记完成</h2>
+    <p id="dMsg"></p>
+    <div class="row">
+      <button class="big white" id="againBtn">登记另一项</button>
+      <button class="big green" id="finishBtn" style="flex:0 0 auto;padding:24px 60px">完成</button>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const q = new URLSearchParams(location.search);
+const CLASS = q.get('class') || '', KEY = q.get('key') || '';
+const COLOR = { 语文: '#ef5a5a', 数学: '#3b9cf5', 英语: '#8b7cf6', 物理: '#14b8a6', 化学: '#1fb57a', 生物: '#84cc16', 政治: '#f2706b', 历史: '#d97706', 地理: '#0ea5e9' };
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let D = { students: [], homework: [] }, cur = null, missing = new Set();
+
+function show(id) { ['pick', 'mark', 'done'].forEach(x => $('#' + x).classList.toggle('hidden', x !== id)); window.scrollTo(0, 0); }
+function subjStyle(s) { const c = COLOR[s] || '#3b9cf5'; return `background:${c}1a;color:${c}`; }
+
+async function load() {
+  $('#cls').textContent = CLASS;
+  try {
+    const r = await fetch(`/api/collect/today?class=${encodeURIComponent(CLASS)}&key=${encodeURIComponent(KEY)}`);
+    if (!r.ok) throw new Error((await r.json()).error || r.status);
+    D = await r.json();
+  } catch (e) { $('#hwList').innerHTML = `<div class="empty">连接失败：${esc(e.message)}</div>`; return; }
+  renderList();
+  const want = +q.get('hw');
+  if (want && D.homework.some(h => h.id === want)) openHw(want);
+}
+function renderList() {
+  $('#hwList').innerHTML = D.homework.map(h => {
+    const c = h.collect;
+    const st = c ? (c.missing.length ? `已登记 · <b class="no">未交 ${c.missing.length} 人</b>` : '已登记 · <b class="ok">全部已交</b>') : '还没有登记';
+    const when = h.date === D.today ? '今天布置' : h.date === D.yesterday ? '昨天布置' : `${+h.date.slice(5, 7)}月${+h.date.slice(8)}日布置`;
+    return `<button class="hw" data-hw="${h.id}"><span class="subj" style="${subjStyle(h.subject)}">${esc(h.subject)}</span>
+      <div class="ct">${esc(h.content)}<span class="when">${when}</span></div><div class="st">${st}</div></button>`;
+  }).join('') || '<div class="empty">今天没有要交的作业<br><span style="font-size:20px">昨天布置的"明天交"作业，今天在这里登记；当天要收的作业，老师布置时选"今天交"</span></div>';
+}
+function openHw(id) {
+  cur = D.homework.find(h => h.id === id);
+  missing = new Set(cur.collect ? cur.collect.missing : []);
+  $('#mSubj').textContent = cur.subject; $('#mSubj').style.cssText = subjStyle(cur.subject);
+  $('#mCt').textContent = cur.content;
+  renderGrid(); show('mark');
+}
+function renderGrid() {
+  $('#grid').innerHTML = D.students.map(n => `<button class="stu ${missing.has(n) ? 'miss' : ''}" data-name="${esc(n)}">${esc(n)}</button>`).join('');
+  $('#mCount').innerHTML = `<span class="ok">已交 ${D.students.length - missing.size}</span> · <span class="no">未交 ${missing.size}</span>`;
+}
+async function save() {
+  $('#saveBtn').disabled = true; $('#saveBtn').textContent = '提交中…';
+  try {
+    const r = await fetch(`/api/collect/save?key=${encodeURIComponent(KEY)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ class: CLASS, hw_id: cur.id, missing: [...missing] }) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error);
+    cur.collect = { missing: j.missing };
+    $('#dMsg').textContent = `${cur.subject}作业：` + (j.missing.length ? `未交 ${j.missing.length} 人（${j.missing.join('、')}），已通知老师` : '全部已交，真棒！');
+    renderList(); show('done');
+  } catch (e) { alert('提交失败：' + e.message); }
+  $('#saveBtn').disabled = false; $('#saveBtn').textContent = '提交登记';
+}
+function closePage() { window.close(); setTimeout(() => { document.body.innerHTML = '<div class="empty" style="padding-top:30vh">登记已保存，可以关闭这个页面了</div>'; }, 300); }
+
+document.addEventListener('click', e => {
+  const h = e.target.closest('[data-hw]'); if (h) return openHw(+h.dataset.hw);
+  const s = e.target.closest('[data-name]');
+  if (s) { const n = s.dataset.name; missing.has(n) ? missing.delete(n) : missing.add(n); renderGrid(); }
+});
+$('#backBtn').onclick = () => show('pick');
+$('#allBtn').onclick = () => { missing.clear(); renderGrid(); };
+$('#saveBtn').onclick = save;
+$('#againBtn').onclick = () => show('pick');
+$('#finishBtn').onclick = closePage;
+$('#closeBtn').onclick = closePage;
+$('#fsBtn').onclick = () => { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); };
+setInterval(() => { $('#clock').textContent = new Date().toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }); }, 1000);
+load();
+</script>
+</body>
+</html>

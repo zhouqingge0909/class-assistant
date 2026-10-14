@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>教室接收端</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: #e2e8f0; color: #0f172a;
+         font: 16px/1.5 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .idle { height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 16px; }
+  .idle h1 { margin: 0; font-size: 32px; }
+  .idle .st { color: #475569; }
+  .idle button { font: inherit; font-size: 20px; padding: 14px 40px; border: 0; border-radius: 12px; background: #2563eb; color: #fff; cursor: pointer; }
+  .hidden { display: none !important; }
+
+  .popup { position: fixed; inset: 6vh 8vw; background: #0f172a; border: 6px solid #f59e0b; border-radius: 20px;
+           display: flex; flex-direction: column; padding: 3vh 3vw; z-index: 10; box-shadow: 0 30px 80px rgba(0,0,0,.4); }
+  .popup .head { color: #fcd34d; font-size: clamp(18px, 3vw, 34px); }
+  .popup .body { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center;
+                 color: #fff; font-weight: 800; font-size: clamp(32px, 7vw, 110px); line-height: 1.25; }
+  .ok { align-self: center; font: inherit; font-weight: 700; border: 0; border-radius: 14px; background: #f59e0b;
+        color: #0f172a; cursor: pointer; font-size: clamp(22px, 3vw, 40px); padding: 10px 70px; }
+
+  .corner { position: fixed; right: 20px; width: min(520px, calc(100vw - 40px)); background: #0f172a; color: #fff;
+            border-left: 6px solid #f59e0b; border-radius: 12px; padding: 14px 18px; z-index: 9;
+            display: flex; gap: 14px; align-items: center; box-shadow: 0 10px 30px rgba(0,0,0,.3); }
+  .corner .t { flex: 1; }
+  .corner .head { color: #fcd34d; font-size: 13px; }
+  .corner .body { font-size: 22px; font-weight: 700; }
+  .corner .ok { font-size: 18px; padding: 8px 18px; }
+</style>
+</head>
+<body>
+<div class="idle">
+  <h1 id="title">教室接收端</h1>
+  <div class="st" id="status">点击下方按钮开始接收（浏览器需要先点一下才允许播放声音）</div>
+  <button id="startBtn">开始接收</button>
+  <div class="st" style="font-size:13px;max-width:520px">这是浏览器测试版。正式在一体机上请用 Windows 接收程序，它可以在放 PPT 时也弹到最前面。</div>
+</div>
+<div id="layer"></div>
+
+<script>
+const q = new URLSearchParams(location.search);
+const CLASS = q.get('class') || '', KEY = q.get('key') || '';
+const shown = new Map(); // id -> element
+document.getElementById('title').textContent = CLASS ? `${CLASS} · 接收端` : '缺少 class 参数';
+
+function speak(text, times = 2) {
+  if (!('speechSynthesis' in window)) return;
+  for (let i = 0; i < times; i++) {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'zh-CN'; u.rate = 0.9;
+    speechSynthesis.speak(u);
+  }
+}
+
+// 先放"叮—咚"提示音，再放服务器生成的自然人声；没有人声文件时退回浏览器自带语音
+function announce(m) {
+  const chime = new Audio('/audio/chime.wav');
+  const next = () => {
+    if (!m.audio) return speak(m.text);
+    new Audio(m.audio).play().catch(() => speak(m.text));
+  };
+  chime.onended = next;
+  chime.play().catch(next);
+}
+
+function layoutCorners() {
+  let bottom = 20;
+  for (const el of shown.values()) {
+    if (el.classList.contains('corner')) { el.style.bottom = bottom + 'px'; bottom += el.offsetHeight + 12; }
+  }
+}
+
+function show(m) {
+  const el = document.createElement('div');
+  el.className = m.popup ? 'popup' : 'corner';
+  el.innerHTML = m.popup
+    ? `<div class="head"></div><div class="body"></div><button class="ok">收到</button>`
+    : `<div class="t"><div class="head"></div><div class="body"></div></div><button class="ok">收到</button>`;
+  el.querySelector('.head').textContent = `【喊话】${m.sender} · ${m.time}`;
+  el.querySelector('.body').textContent = m.text;
+  el.querySelector('.ok').onclick = () => ack(m.id);
+  document.getElementById('layer').appendChild(el);
+  shown.set(m.id, el);
+  layoutCorners();
+  if (m.voice) announce(m);
+}
+
+function close(id) {
+  const el = shown.get(id);
+  if (el) { el.remove(); shown.delete(id); layoutCorners(); }
+}
+
+async function ack(id) {
+  close(id);
+  try {
+    await fetch(`/api/ack?key=${encodeURIComponent(KEY)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+  } catch {}
+}
+
+async function poll() {
+  const st = document.getElementById('status');
+  try {
+    const r = await fetch(`/api/poll?class=${encodeURIComponent(CLASS)}&key=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
+    const j = await r.json();
+    if (!r.ok) { st.textContent = '连接失败：' + (j.error || r.status); return; }
+    st.textContent = `已连接，等待喊话…（${new Date().toLocaleTimeString()}）`;
+    const active = new Set(j.messages.map(m => m.id));
+    j.messages.forEach(m => { if (!shown.has(m.id)) show(m); });
+    [...shown.keys()].forEach(id => { if (!active.has(id)) close(id); });
+  } catch { st.textContent = '网络断开，正在重连…'; }
+}
+
+document.getElementById('startBtn').onclick = e => {
+  e.target.remove();
+  new Audio('/audio/chime.wav').play().catch(() => {});
+  poll(); setInterval(poll, 2000);
+};
+</script>
+</body>
+</html>

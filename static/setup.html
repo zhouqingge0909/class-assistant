@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#16a571">
+<title>自己搭一套 · 班级助手</title>
+<link rel="stylesheet" href="/fonts/misans/MiSans-Regular.min.css">
+<link rel="stylesheet" href="/fonts/misans/MiSans-Bold.min.css">
+<style>
+  * { box-sizing: border-box; }
+  html, body { overflow-x: hidden; }
+  body { margin: 0; color: #23324a; font: 16px/1.75 MiSans, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: radial-gradient(900px 520px at -5% -10%, #d6f5e6 0, transparent 60%), radial-gradient(800px 480px at 105% 0%, #dcefff 0, transparent 60%), #f3faf7; }
+  main { max-width: 680px; margin: 0 auto; padding: 28px 16px 60px; }
+  header { text-align: center; margin-bottom: 22px; }
+  .logo { width: 60px; height: 60px; border-radius: 18px; margin: 0 auto 12px; display: grid; place-items: center;
+    background: linear-gradient(135deg, #34d399, #16a571); box-shadow: 0 8px 20px rgba(22, 165, 113, .3); }
+  h1 { margin: 0; font-size: 25px; }
+  .sub { color: #7a8699; margin: 4px 0 0; }
+  .card { background: #fff; border-radius: 20px; padding: 20px 20px; margin-top: 14px; box-shadow: 0 8px 24px rgba(35, 50, 74, .06); }
+  .intro p { margin: 0 0 8px; }
+  .intro p:last-child { margin: 0; }
+  .ok { color: #128a5b; font-weight: 700; }
+  .step { display: flex; gap: 14px; }
+  .num { flex: none; width: 32px; height: 32px; border-radius: 50%; background: #16a571; color: #fff; font-weight: 800; display: grid; place-items: center; margin-top: 1px; }
+  .step h2 { font-size: 18px; margin: 2px 0 6px; }
+  .step .body { flex: 1; min-width: 0; }
+  .step p, .step ul, .step ol { margin: 0 0 8px; }
+  .step ul, .step ol { padding-left: 20px; }
+  .step li { margin-bottom: 4px; }
+  b { color: #16324f; }
+  .cmd { display: flex; align-items: stretch; gap: 8px; margin: 10px 0; }
+  .cmd code { flex: 1; min-width: 0; background: #1f2a37; color: #d7f5e6; border-radius: 12px; padding: 12px 14px; font: 13.5px/1.6 ui-monospace, Menlo, Consolas, monospace; word-break: break-all; }
+  .cmd button { flex: none; border: 0; border-radius: 12px; padding: 0 16px; background: #16a571; color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+  .cmd button:active { transform: scale(.97); }
+  .screen { background: #1f2a37; color: #d7f5e6; border-radius: 12px; padding: 12px 14px; font: 13px/1.7 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; margin: 10px 0; }
+  .screen .hl { color: #ffd479; }
+  .note { background: #fff8e6; border-radius: 12px; padding: 10px 14px; font-size: 14.5px; color: #7a5a12; margin: 10px 0 0; }
+  .muted { color: #7a8699; font-size: 14.5px; }
+  h3 { font-size: 17px; margin: 0 0 10px; }
+  details { border-top: 1px solid #edf1f5; padding: 10px 0; }
+  details:first-of-type { border-top: 0; }
+  summary { cursor: pointer; font-weight: 700; }
+  details p { margin: 6px 0 0; color: #4a5a70; }
+  .toast { position: fixed; left: 50%; bottom: 30px; transform: translateX(-50%); background: #23324a; color: #fff; padding: 8px 18px; border-radius: 99px; font-size: 15px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="logo"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg></div>
+    <h1>班级助手 · 自己搭一套</h1>
+    <p class="sub">跟着做，大约 20 分钟，不需要会编程</p>
+  </header>
+
+  <div class="card intro">
+    <p>班级助手装在<b>你自己的云服务器</b>上。学生名单、作业、考勤这些数据都只存在你的服务器里，<span class="ok">作者看不到</span>。</p>
+    <p><b>需要准备：</b></p>
+    <ul style="margin:0;padding-left:20px">
+      <li>一台云服务器（下面以腾讯云"轻量应用服务器"为例，买最低配置就够了，阿里云等其他云也可以）</li>
+      <li>教室一体机是 <b>银河麒麟 / 统信 UOS</b>（很多希沃一体机是这种），或者 <b>Windows</b>，都可以。</li>
+    </ul>
+  </div>
+
+  <div class="card step">
+    <div class="num">1</div>
+    <div class="body">
+      <h2>买一台云服务器</h2>
+      <ol>
+        <li>打开腾讯云官网，找到<b>轻量应用服务器</b>，点"新建"。</li>
+        <li>地域：选离学校近的。</li>
+        <li>镜像：选<b>系统镜像 → Ubuntu 24.04</b>（22.04 也行）。<br><span class="muted">不要选"宝塔""WordPress"这类应用镜像。</span></li>
+        <li>套餐：最低配置（2 核 2G）就够用。</li>
+      </ol>
+      <p>付款后等一两分钟，服务器状态变成"运行中"就可以了。</p>
+    </div>
+  </div>
+
+  <div class="card step">
+    <div class="num">2</div>
+    <div class="body">
+      <h2>打开服务器的命令窗口</h2>
+      <p>在服务器控制台里点这台服务器的<b>"登录"</b>按钮，按提示用网页方式登录。登录后会出现一个黑色窗口，这就是命令窗口。</p>
+      <p class="muted">最好在电脑上操作，手机上不方便粘贴。</p>
+    </div>
+  </div>
+
+  <div class="card step">
+    <div class="num">3</div>
+    <div class="body">
+      <h2>粘贴安装命令，按回车</h2>
+      <p>复制下面这行，粘贴到黑色窗口里，按回车：</p>
+      <div class="cmd"><code id="setupCmd">curl -fsSL http://下载地址/dist/setup.sh | sudo bash</code><button data-copy="setupCmd">复制</button></div>
+      <p class="muted">黑色窗口里粘贴：点右键选"粘贴"，或者按 <b>Ctrl + Shift + V</b>（Mac 上按 Cmd + V）。</p>
+      <p>第一次安装大约要等 <b>5 分钟</b>。装好后最后会显示：</p>
+      <div class="screen">============================
+ ✅ 班级助手已经装好，并会开机自动运行
+
+   工作台地址：<span class="hl">http://你的服务器IP</span>
+   管理员密码：<span class="hl">一串随机密码</span>
+============================</div>
+      <p><b>把工作台地址和管理员密码截图保存好。</b></p>
+    </div>
+  </div>
+
+  <div class="card step">
+    <div class="num">4</div>
+    <div class="body">
+      <h2>登录工作台，建班</h2>
+      <ol>
+        <li>用手机或电脑浏览器打开<b>工作台地址</b>，输入管理员密码登录。</li>
+        <li>点顶部的班级下拉框，选<b>"＋ 添加 / 管理班级…"</b>。</li>
+        <li>填上班级名，比如"高一3班"。学生名单可以一行一个名字粘贴进去，也可以先空着，以后让班主任自己导入。</li>
+      </ol>
+      <div class="note">打不开工作台？到服务器控制台的<b>"防火墙"</b>页面，添加一条规则：协议 TCP，端口 80，允许。腾讯云轻量服务器一般默认已经放行了。</div>
+    </div>
+  </div>
+
+  <div class="card step">
+    <div class="num">5</div>
+    <div class="body">
+      <h2>在教室一体机上装接收端</h2>
+      <ol>
+        <li>在工作台"添加 / 管理班级"里选中这个班，选一体机系统（麒麟/统信 或 Windows），下面会显示这个班的<b>一体机安装命令</b>，点复制。<br><span class="muted">可以用微信或 U 盘把命令传到一体机上。</span></li>
+      </ol>
+      <p><b>麒麟 / 统信：</b>在桌面空白处点右键，选<b>"打开终端"</b>（也可以按 Ctrl + Alt + T），粘贴命令（Ctrl + Shift + V），按回车。出现 <span class="ok">✅ 安装完成</span> 就好了。</p>
+      <p><b>Windows：</b>按 <b>Win + R</b>，粘贴命令，按回车。第一次会自动下载安装 Python，等 1–3 分钟，出现 <span class="ok">√ 安装完成</span> 就好了。</p>
+      <p>回到工作台给这个班发一句话，大屏弹出来并播报，就说明全部装好了。</p>
+    </div>
+  </div>
+
+  <div class="card step">
+    <div class="num">6</div>
+    <div class="body">
+      <h2>邀请同事</h2>
+      <p>在"添加 / 管理班级"里可以生成<b>班主任二维码</b>。班主任扫码加入后，能管本班的全部功能，还可以再发<b>任课老师二维码</b>，邀请各科老师加入。</p>
+      <p class="muted">老师们扫码就能用，不需要密码。管理员密码只有你自己知道。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>常见问题</h3>
+    <details>
+      <summary>一体机需要联网吗？</summary>
+      <p>需要，而且要一直联着。一体机每 2 秒向你的服务器问一次有没有新消息，断网就收不到喊话。不过它只需要能连上你自己的服务器，不用登录任何账号。学校网络有限制的话，先用一体机的浏览器打开工作台地址试试，能打开就没问题。断网期间发的消息会在服务器上保留 2 小时，一体机重新联网后会补收。</p>
+    </details>
+    <details>
+      <summary>怎么更新到最新版？</summary>
+      <p>在服务器的命令窗口里，把第 3 步的安装命令再运行一次就行，班级数据不会丢。教室一体机会在 10 分钟内自动跟着更新，不用再去教室。</p>
+    </details>
+    <details>
+      <summary>忘了管理员密码怎么办？</summary>
+      <p>把第 3 步的安装命令再运行一次，最后会重新显示管理员密码。</p>
+    </details>
+    <details>
+      <summary>数据会丢吗？怎么备份？</summary>
+      <p>服务器每天会自动备份一次，保留 30 天。班主任也可以在"记录"栏目里"导出本班数据"，得到一个 Excel 文件自己留存。</p>
+    </details>
+    <details>
+      <summary>作者能看到我们班的数据吗？</summary>
+      <p>看不到。安装包里只有程序，所有数据都存在你自己的服务器上。</p>
+    </details>
+    <details>
+      <summary>不想用了，怎么从一体机上卸载？</summary>
+      <p>在"添加 / 管理班级"里，安装命令下面有"不用了？卸载一体机上的班级助手"，点开复制卸载命令，在一体机上用和安装一样的方法粘贴运行即可。删班之前先卸载。</p>
+    </details>
+    <details>
+      <summary>一体机安装时提示"下载失败"？</summary>
+      <p>说明一体机没连上网，或者连不上你的服务器。先用一体机的浏览器打开工作台地址试试，能打开再重新运行安装命令。</p>
+    </details>
+  </div>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+function toast(t) { const el = document.getElementById('toast'); el.textContent = t; el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 1600); }
+async function copyText(txt) {  // http 页面没有 clipboard API，退回到老办法
+  try { await navigator.clipboard.writeText(txt); return toast('已复制 ✓'); } catch {}
+  const ta = document.createElement('textarea'); ta.value = txt; ta.style.cssText = 'position:fixed;top:0;opacity:0';
+  document.body.appendChild(ta); ta.select(); let ok = false; try { ok = document.execCommand('copy'); } catch {} ta.remove();
+  if (ok) toast('已复制 ✓'); else prompt('长按复制：', txt);
+}
+document.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => copyText(document.getElementById(b.dataset.copy).textContent));
+</script>
+<script>
+// 安装命令用打开这个页面的服务器做下载地址（谁的服务器上有安装包，就从谁那里下载）
+document.getElementById('setupCmd').textContent = `curl -fsSL http://${location.host}/dist/setup.sh | sudo SRC=http://${location.host} bash`;
+</script>
+</body>
+</html>

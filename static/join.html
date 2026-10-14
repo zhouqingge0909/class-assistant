@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#16a571">
+<title>加入班级 · 班级助手</title>
+<link rel="stylesheet" href="/fonts/misans/MiSans-Regular.min.css">
+<link rel="stylesheet" href="/fonts/misans/MiSans-Bold.min.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 18px; color: #23324a;
+    font: 16px/1.6 MiSans, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: radial-gradient(900px 520px at -5% -10%, #d6f5e6 0, transparent 60%), radial-gradient(800px 480px at 105% 0%, #dcefff 0, transparent 60%), #f3faf7; }
+  .card { width: 100%; max-width: 400px; background: #fff; border-radius: 26px; padding: 30px 26px; box-shadow: 0 12px 32px rgba(35, 50, 74, .08); text-align: center; }
+  .logo { width: 64px; height: 64px; border-radius: 20px; margin: 0 auto 14px; display: grid; place-items: center; font-size: 30px; color: #fff;
+    background: linear-gradient(135deg, #34d399, #3b9cf5); box-shadow: 0 8px 20px rgba(59, 156, 245, .3); }
+  h1 { margin: 0 0 6px; font-size: 22px; }
+  p { margin: 0 0 20px; color: #7a8699; }
+  .cls { font-size: 26px; font-weight: 800; color: #1f6fc0; }
+  .role { display: inline-block; margin-top: 6px; padding: 3px 12px; border-radius: 99px; background: #e2f7ee; color: #128a5b; font-weight: 700; font-size: 14px; }
+  input { width: 100%; font: inherit; padding: 14px 16px; border: 1.5px solid #e6ecf2; border-radius: 14px; outline: none; margin-top: 18px; text-align: center; }
+  input:focus { border-color: #3b9cf5; box-shadow: 0 0 0 4px #e6f3ff; }
+  button { width: 100%; font: inherit; font-weight: 800; font-size: 18px; border: 0; border-radius: 16px; padding: 15px; margin-top: 14px; color: #fff; cursor: pointer;
+    background: linear-gradient(135deg, #3b9cf5, #34d399); box-shadow: 0 8px 20px rgba(59, 156, 245, .3); }
+  .err { color: #ef5a5a; min-height: 24px; margin-top: 10px; font-size: 14px; }
+  .tip { font-size: 13px; color: #9aa6b5; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="logo"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg></div>
+  <div id="body"><p>加载中…</p></div>
+</div>
+<script>
+const q = new URLSearchParams(location.search), $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const token = (() => { try { return localStorage.getItem('cc_token') || ''; } catch { return ''; } })();
+const save = (t, n) => { try { if (t) localStorage.setItem('cc_token', t); localStorage.setItem('cc_name', n); } catch {} };
+const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify(body) })
+  .then(async r => { const j = await r.json(); if (!r.ok) throw new Error(j.error); return j; });
+
+async function joinMode(code) {
+  let info;
+  try { const r = await fetch('/api/join/info?c=' + encodeURIComponent(code)); info = await r.json(); if (!r.ok) throw new Error(info.error); }
+  catch (e) { $('#body').innerHTML = `<h1>无法加入</h1><p>${esc(e.message)}</p>`; return; }
+  const roleTxt = info.role === 'head' ? '班主任' : '任课老师';
+  let me = null;
+  if (token) { try { const r = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } }); if (r.ok) me = await r.json(); } catch {} }
+  $('#body').innerHTML = `<h1>邀请你加入</h1><div class="cls">${esc(info.class)}</div><div class="role">${roleTxt}</div>
+    ${me ? `<p style="margin-top:16px">你已登录为 <b>${esc(me.name)}</b>，点下面把这个班加到你的工作台</p>`
+         : `<input id="name" maxlength="20" placeholder="你的称呼，如：数学王老师" autofocus>`}
+    <button id="go">${me ? '加入这个班' : '加入'}</button><div class="err" id="err"></div>
+    ${me ? '' : '<div class="tip">称呼会显示在你发的每条消息上，以后这台手机打开就自动登录</div>'}`;
+  $('#go').onclick = async () => {
+    try { const r = await post('/api/join', { code, name: me ? '' : $('#name').value.trim() }); save(r.token, r.name); location.href = '/'; }
+    catch (e) { $('#err').textContent = e.message; }
+  };
+  if ($('#name')) $('#name').onkeydown = e => { if (e.key === 'Enter') $('#go').click(); };
+}
+async function loginMode(u, k) {
+  $('#body').innerHTML = '<h1>正在登录…</h1>';
+  try { const r = await post('/api/login/link', { u, k }); save(r.token, r.name); location.href = '/'; }
+  catch (e) { $('#body').innerHTML = `<h1>登录失败</h1><p>${esc(e.message)}</p>`; }
+}
+if (q.get('c')) joinMode(q.get('c'));
+else if (q.get('u') && q.get('k')) loginMode(q.get('u'), q.get('k'));
+else $('#body').innerHTML = '<h1>班级助手</h1><p>请扫描班主任发给你的二维码加入</p>';
+</script>
+</body>
+</html>

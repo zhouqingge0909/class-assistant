@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>考勤登记</title>
+<link rel="stylesheet" href="/fonts/misans/MiSans-Regular.min.css">
+<link rel="stylesheet" href="/fonts/misans/MiSans-Bold.min.css">
+<style>
+  :root { --text: #1d2b40; --muted: #7a8699; --green: #1fb57a;
+    --迟到: #f59e0b; --请假: #3b9cf5; --缺勤: #ef5a5a; --早退: #8b7cf6; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body { margin: 0; min-height: 100%; color: var(--text); font-family: MiSans, "PingFang SC", "Noto Sans CJK SC", sans-serif; }
+  body { background: radial-gradient(900px 520px at -5% -10%, #dcefff 0, transparent 60%),
+                     radial-gradient(800px 480px at 105% 0%, #ece8ff 0, transparent 60%), #f4f7fb; }
+  button { font: inherit; color: inherit; cursor: pointer; border: 0; }
+  .hidden { display: none !important; }
+  header { display: flex; align-items: center; gap: 16px; padding: 18px 32px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 30px; }
+  header .cls { font-size: 20px; color: var(--muted); }
+  header .sp { flex: 1; }
+  .hbtn { padding: 12px 22px; border-radius: 14px; background: #fff; font-size: 18px; font-weight: 700; box-shadow: 0 4px 12px rgba(35, 50, 74, .06); }
+  main { padding: 0 32px 32px; }
+  .panel { display: flex; gap: 24px; align-items: center; background: #fff; border-radius: 22px; padding: 16px 20px; margin-bottom: 16px;
+    box-shadow: 0 8px 22px rgba(35, 50, 74, .06); flex-wrap: wrap; }
+  .panel .lb { font-size: 20px; color: var(--muted); font-weight: 700; }
+  .seg { display: flex; gap: 10px; flex-wrap: wrap; }
+  .seg button { padding: 12px 24px; border-radius: 16px; font-size: 22px; font-weight: 800; background: #f1f4f8; color: var(--muted); }
+  .seg button.on { background: #1d2b40; color: #fff; }
+  .seg button small { font-size: 14px; font-weight: 600; opacity: .8; margin-left: 4px; }
+  .brush button { border: 3px solid transparent; }
+  .brush button.on { background: var(--c); color: #fff; box-shadow: 0 8px 18px color-mix(in srgb, var(--c) 35%, transparent); }
+  .brush button:not(.on) { color: var(--c); background: #fff; border-color: var(--c); }
+  .count { font-size: 20px; font-weight: 800; margin-left: auto; display: flex; gap: 14px; flex-wrap: wrap; }
+  .tip { font-size: 21px; color: var(--muted); margin: 4px 0 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+  .stu { height: 96px; border-radius: 20px; background: #fff; font-size: 28px; font-weight: 800; position: relative;
+    box-shadow: 0 6px 16px rgba(35, 50, 74, .07); border: 3px solid transparent; transition: transform .1s; }
+  .stu:active { transform: scale(.96); }
+  .stu.m { border-color: var(--c); color: var(--c); background: #fff; }
+  .stu.m::after { content: attr(data-t); position: absolute; top: 6px; right: 10px; font-size: 14px; background: var(--c); color: #fff; border-radius: 99px; padding: 1px 9px; }
+  .actions { position: sticky; bottom: 0; display: flex; gap: 16px; padding: 18px 0 4px; margin-top: 10px; background: linear-gradient(to top, #f4f7fb 70%, transparent); }
+  .big { flex: 1; padding: 24px; border-radius: 22px; font-size: 28px; font-weight: 800; }
+  .big.green { background: linear-gradient(135deg, #1fb57a, #34d399); color: #fff; box-shadow: 0 10px 24px rgba(31, 181, 122, .3); }
+  .big.white { background: #fff; flex: 0 0 auto; padding: 24px 34px; box-shadow: 0 6px 16px rgba(35, 50, 74, .07); }
+  .done { text-align: center; padding-top: 8vh; }
+  .done .ok { width: 120px; height: 120px; border-radius: 50%; margin: 0 auto 20px; display: grid; place-items: center; font-size: 64px; color: #fff;
+    background: linear-gradient(135deg, #1fb57a, #34d399); box-shadow: 0 12px 30px rgba(31, 181, 122, .35); }
+  .done h2 { font-size: 40px; margin: 0 0 10px; }
+  .done p { font-size: 24px; color: var(--muted); margin: 0 0 34px; line-height: 1.6; }
+  .done .row { display: flex; gap: 16px; justify-content: center; }
+  .empty { text-align: center; font-size: 26px; color: var(--muted); padding: 12vh 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>考勤登记</h1><span class="cls" id="cls"></span>
+  <span class="sp"></span>
+  <button class="hbtn" id="fsBtn">全屏</button>
+  <button class="hbtn" id="closeBtn">关闭</button>
+</header>
+<main>
+  <section id="mark">
+    <div class="panel"><span class="lb">时段</span><div class="seg" id="sessions"></div></div>
+    <div class="panel"><span class="lb">先选</span><div class="seg brush" id="brush"></div><div class="count" id="count"></div></div>
+    <div class="tip">再点对应的同学（再点一次取消）。没有点的同学都算<b style="color:var(--green)">正常出勤</b>。</div>
+    <div class="grid" id="grid"></div>
+    <div class="actions">
+      <button class="big white" id="allBtn">全部正常</button>
+      <button class="big green" id="saveBtn">提交登记</button>
+    </div>
+  </section>
+  <section id="done" class="hidden done">
+    <div class="ok">✓</div>
+    <h2>登记完成</h2>
+    <p id="dMsg"></p>
+    <div class="row">
+      <button class="big white" id="againBtn">修改 / 登记其他时段</button>
+      <button class="big green" id="finishBtn" style="flex:0 0 auto;padding:24px 60px">完成</button>
+    </div>
+  </section>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const q = new URLSearchParams(location.search);
+const CLASS = q.get('class') || '', KEY = q.get('key') || '';
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const cvar = t => `var(--${t})`;
+let D = { students: [], sessions: [], types: [], records: {} }, session = '', brush = '迟到', marks = {};
+
+async function load() {
+  $('#cls').textContent = CLASS;
+  try {
+    const r = await fetch(`/api/attend/today?class=${encodeURIComponent(CLASS)}&key=${encodeURIComponent(KEY)}`);
+    if (!r.ok) throw new Error((await r.json()).error || r.status);
+    D = await r.json();
+  } catch (e) { $('#mark').innerHTML = `<div class="empty">连接失败：${esc(e.message)}</div>`; return; }
+  $('#cls').textContent = `${CLASS} · ${D.date}`;
+  brush = D.types[0];
+  pickSession(D.current);
+}
+function pickSession(s) { session = s; marks = { ...(D.records[s] || {}) }; render(); }
+function render() {
+  $('#sessions').innerHTML = D.sessions.map(s => `<button data-session="${s}" class="${s === session ? 'on' : ''}">${s}${D.records[s] ? '<small>已登记</small>' : ''}</button>`).join('');
+  $('#brush').innerHTML = D.types.map(t => `<button data-brush="${t}" class="${t === brush ? 'on' : ''}" style="--c:${cvar(t)}">${t}</button>`).join('');
+  $('#grid').innerHTML = D.students.map(n => { const t = marks[n];
+    return `<button class="stu ${t ? 'm' : ''}" data-name="${esc(n)}" ${t ? `data-t="${t}" style="--c:${cvar(t)}"` : ''}>${esc(n)}</button>`; }).join('');
+  const cnt = {}; Object.values(marks).forEach(t => cnt[t] = (cnt[t] || 0) + 1);
+  $('#count').innerHTML = `<span style="color:var(--green)">正常 ${D.students.length - Object.keys(marks).length}</span>` +
+    D.types.filter(t => cnt[t]).map(t => `<span style="color:${cvar(t)}">${t} ${cnt[t]}</span>`).join('');
+}
+async function save() {
+  $('#saveBtn').disabled = true; $('#saveBtn').textContent = '提交中…';
+  try {
+    const r = await fetch(`/api/attend/save?key=${encodeURIComponent(KEY)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ class: CLASS, session, marks }) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error);
+    D.records[session] = j.marks;
+    const by = {}; Object.entries(j.marks).forEach(([n, t]) => (by[t] = by[t] || []).push(n));
+    $('#dMsg').innerHTML = `${session}：` + (Object.keys(by).length
+      ? D.types.filter(t => by[t]).map(t => `<span style="color:${cvar(t)};font-weight:800">${t}</span> ${esc(by[t].join('、'))}`).join('<br>')
+      : '全部正常出勤 👍');
+    $('#mark').classList.add('hidden'); $('#done').classList.remove('hidden');
+  } catch (e) { alert('提交失败：' + e.message); }
+  $('#saveBtn').disabled = false; $('#saveBtn').textContent = '提交登记';
+}
+function closePage() { window.close(); setTimeout(() => { document.body.innerHTML = '<div class="empty" style="padding-top:30vh">考勤已保存，可以关闭这个页面了</div>'; }, 300); }
+document.addEventListener('click', e => {
+  const s = e.target.closest('[data-session]'); if (s) return pickSession(s.dataset.session);
+  const b = e.target.closest('[data-brush]'); if (b) { brush = b.dataset.brush; return render(); }
+  const n = e.target.closest('[data-name]');
+  if (n) { const k = n.dataset.name; marks[k] === brush ? delete marks[k] : (marks[k] = brush); render(); }
+});
+$('#allBtn').onclick = () => { marks = {}; render(); };
+$('#saveBtn').onclick = save;
+$('#againBtn').onclick = () => { $('#done').classList.add('hidden'); $('#mark').classList.remove('hidden'); render(); };
+$('#finishBtn').onclick = closePage;
+$('#closeBtn').onclick = closePage;
+$('#fsBtn').onclick = () => { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); };
+load();
+</script>
+</body>
+</html>
