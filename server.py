@@ -15,6 +15,7 @@ import os
 import random
 import re
 import secrets
+import shutil
 import socket
 import threading
 import struct
@@ -40,10 +41,19 @@ MORNING_PATH = os.path.join(DATA_DIR, "morning.json")
 NOTES_PATH = os.path.join(DATA_DIR, "notes.json")
 ATTEND_PATH = os.path.join(DATA_DIR, "attend.json")
 QUIZ_PATH = os.path.join(DATA_DIR, "quiz.json")
+EXAM_PATH = os.path.join(DATA_DIR, "exams.json")
 ROSTER_PATH = os.path.join(DATA_DIR, "roster.json")
 USERS_PATH = os.path.join(DATA_DIR, "users.json")  # 老师账号、各班成员（班主任/科任）、邀请码
 BACKUP_DIR = os.path.join(BASE, "backups")  # 每日数据备份（不在 data/ 里，避免备份套备份）  # 工作台里添加/修改的班级名单（优先于 students.csv）
 IMG_DIR = os.path.join(DATA_DIR, "images")
+FILE_DIR = os.path.join(DATA_DIR, "files")      # 老师发到大屏的文档（Word/PDF/PPT…），保留 7 天
+FILE_PATH = os.path.join(DATA_DIR, "files.json")
+FILE_EXTS = {"pdf", "doc", "docx", "ppt", "pptx", "pps", "ppsx", "xls", "xlsx", "wps", "dps", "et", "txt",
+             "jpg", "jpeg", "png", "mp4", "mp3", "html", "htm"}  # 只收文档、网页、图片、音视频，不收 exe 之类的程序
+FILE_MAX = 50 * 1024 * 1024
+FILE_KEEP_DAYS = 7
+FILE_TOTAL_MAX = 3 * 1024 ** 3  # 所有文件加起来最多 3GB，防止把硬盘塞满
+FILE_CLASS_MAX = 500 * 1024 ** 2  # 公共服务器上每个班最多 500MB，免得几个班把空间占完
 SESSIONS = ["早读", "上午", "下午", "晚自习"]
 ATTEND_TYPES = ["迟到", "请假", "缺勤", "早退"]
 STATIC = os.path.join(BASE, "static")
@@ -143,6 +153,137 @@ VOICES = [
 ]
 VOICE_IDS = {v["id"] for v in VOICES}
 
+# 腾讯云语音合成（付费，服务器上 edge-tts 被微软拒绝时用）：密钥只放在服务器上的 tts.json，
+# 不进 config.json、不随部署上传、不进备份。文件格式：{"secret_id": "...", "secret_key": "..."}
+# 可选："voice" 默认音色编号、"daily_chars" 每天最多合成多少字（防止意外多扣费，默认 20000）
+TTS_PATH = os.path.join(BASE, "tts.json")
+TC_VOICES = [
+    {"id": "tc:101013", "name": "智辉 · 新闻男声"},
+    {"id": "tc:101021", "name": "智瑞 · 新闻男声"},
+    {"id": "tc:101011", "name": "智燕 · 新闻女声"},
+    {"id": "tc:101004", "name": "智云 · 通用男声"},
+    {"id": "tc:101027", "name": "智梅 · 通用女声"},
+    {"id": "tc:501000", "name": "智斌 · 阅读男声（大模型，更自然）"},
+    {"id": "tc:501001", "name": "智兰 · 资讯女声（大模型，更自然）"},
+]
+TC = {}
+if os.path.exists(TTS_PATH):
+    try:
+        with open(TTS_PATH, encoding="utf-8") as f:
+            TC = json.load(f)
+        if not (TC.get("secret_id") and TC.get("secret_key")):
+            TC = {}
+    except Exception as e:
+        print("tts.json 读取失败：", e)
+        TC = {}
+if TC:  # 有腾讯云密钥就只列腾讯云音色
+    VOICES = TC_VOICES
+    VOICE_IDS = {v["id"] for v in VOICES}
+TC_DEFAULT = "tc:" + str(TC.get("voice") or 101013)
+tc_used = {"day": "", "chars": 0}
+
+# 电脑自带语音（不联网、不花钱）：没有腾讯云密钥、也没装 edge-tts 时用。局域网版装在学校 Windows 电脑上就靠它。
+# Windows 用系统自带的 System.Speech（中文版 Windows 一般有"慧慧"），Mac 用 say（方便在 Mac 上测试）
+LOCAL_NAMES = {"Huihui": "慧慧 · 女声", "Yaoyao": "瑶瑶 · 女声", "Kangkang": "康康 · 男声", "Lili": "莉莉 · 女声",
+               "Tingting": "婷婷 · 女声", "Meijia": "美佳 · 女声（台湾）", "Sinji": "善怡 · 女声（粤语）"}
+SAPI_PS = r"""Add-Type -AssemblyName System.Speech
+$s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+try { $s.SelectVoice($args[0]) } catch {}
+$s.Rate = -1
+$f = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo 16000, ([System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen), ([System.Speech.AudioFormat.AudioChannel]::Mono)
+$s.SetOutputToWaveFile($args[1], $f)
+$s.Speak([IO.File]::ReadAllText($args[2], [Text.Encoding]::UTF8))
+$s.Dispose()
+"""
+
+
+def run_quiet(cmd, timeout=30):
+    """运行一个命令，不弹黑窗口，返回输出文字（失败返回空）"""
+    import subprocess
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=timeout,
+                           creationflags=0x08000000 if os.name == "nt" else 0)  # CREATE_NO_WINDOW
+        return r.stdout.decode("utf-8", "replace") if r.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def find_local_voices():
+    out = []
+    if os.name == "nt":
+        names = run_quiet(["powershell", "-NoProfile", "-Command",
+                           "Add-Type -AssemblyName System.Speech;(New-Object System.Speech.Synthesis.SpeechSynthesizer)"
+                           ".GetInstalledVoices()|%{$_.VoiceInfo}|?{$_.Culture.Name -like 'zh*'}|%{$_.Name}"])
+        out = [n.strip() for n in names.splitlines() if n.strip()]
+    elif shutil.which("say"):
+        out = [line.split()[0] for line in run_quiet(["say", "-v", "?"]).splitlines()
+               if "zh_CN" in line or "zh_TW" in line or "zh_HK" in line]
+    out = list(dict.fromkeys(out))
+    order = list(LOCAL_NAMES)
+    out.sort(key=lambda n: next((i for i, k in enumerate(order) if k in n), 99))  # 慧慧排第一，认识的中文语音排前面
+    voices = []
+    for n in out:
+        label = next((v for k, v in LOCAL_NAMES.items() if k in n), n)
+        voices.append({"id": "local:" + n, "name": label + "（电脑自带）"})
+    return voices
+
+
+try:
+    import edge_tts  # noqa: F401  云服务器版用的在线语音
+    EDGE = True
+except ImportError:
+    EDGE = False
+LOCAL_VOICES = [] if TC else find_local_voices()
+if not TC and not EDGE and LOCAL_VOICES:
+    VOICES = LOCAL_VOICES
+    VOICE_IDS = {v["id"] for v in VOICES}
+
+
+def tencent_tts(text, voice):
+    """调腾讯云 TextToVoice（TC3-HMAC-SHA256 签名，只用标准库），返回 mp3 字节"""
+    import base64
+    import urllib.request
+    host, action, version = "tts.tencentcloudapi.com", "TextToVoice", "2019-08-23"
+    payload = json.dumps({"Text": text, "SessionId": secrets.token_hex(8), "VoiceType": int(voice[3:]),
+                          "Codec": "mp3", "SampleRate": 16000, "ModelType": 1, "Speed": 0, "Volume": 3},
+                         ensure_ascii=False).encode()
+    ts = int(time.time())
+    date = datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d")
+    ctype = "application/json; charset=utf-8"
+    canonical = "\n".join(["POST", "/", "", f"content-type:{ctype}", f"host:{host}", f"x-tc-action:{action.lower()}", "",
+                           "content-type;host;x-tc-action", hashlib.sha256(payload).hexdigest()])
+    scope = f"{date}/tts/tc3_request"
+    to_sign = "\n".join(["TC3-HMAC-SHA256", str(ts), scope, hashlib.sha256(canonical.encode()).hexdigest()])
+    k = hmac.new(("TC3" + TC["secret_key"]).encode(), date.encode(), hashlib.sha256).digest()
+    k = hmac.new(k, b"tts", hashlib.sha256).digest()
+    k = hmac.new(k, b"tc3_request", hashlib.sha256).digest()
+    sig = hmac.new(k, to_sign.encode(), hashlib.sha256).hexdigest()
+    req = urllib.request.Request("https://" + host, data=payload, method="POST", headers={
+        "Content-Type": ctype, "Host": host, "X-TC-Action": action, "X-TC-Version": version, "X-TC-Timestamp": str(ts),
+        "Authorization": f"TC3-HMAC-SHA256 Credential={TC['secret_id']}/{scope}, "
+                         f"SignedHeaders=content-type;host;x-tc-action, Signature={sig}"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        resp = json.loads(r.read()).get("Response", {})
+    if "Error" in resp:
+        raise RuntimeError(f"{resp['Error'].get('Code')}：{resp['Error'].get('Message')}")
+    return base64.b64decode(resp["Audio"])
+
+
+def tts_chunks(text, size=140):
+    """腾讯云一次最多 150 个字：按标点切成小段"""
+    out, cur = [], ""
+    for part in re.split(r"(?<=[。！？!?；;，,])", text):
+        while len(part) > size:
+            out.append(part[:size])
+            part = part[size:]
+        if cur and len(cur) + len(part) > size:
+            out.append(cur)
+            cur = ""
+        cur += part
+    if cur.strip():
+        out.append(cur)
+    return out
+
 
 def load_config():
     cfg = dict(DEFAULT_CONFIG)
@@ -199,6 +340,7 @@ def write_json(path, data):
 CFG = load_config()
 os.makedirs(AUDIO_DIR, exist_ok=True)
 os.makedirs(os.path.join(DATA_DIR, "images"), exist_ok=True)
+os.makedirs(FILE_DIR, exist_ok=True)
 lock = threading.Lock()
 messages = read_json(MSG_PATH, [])
 sessions = read_json(SESSION_PATH, {})  # token -> {name, exp}
@@ -211,6 +353,9 @@ settings = read_json(SETTINGS_PATH, {"countdowns": [{"name": "高考", "date": "
 settings.setdefault("standby", {"enabled": True, "idle_minutes": 5})
 if settings.get("screen_font") not in ("misans", "wenkai", "system"):
     settings["screen_font"] = "misans"
+files = read_json(FILE_PATH, [])         # 文件：{id, class, name, ext, size, by, uid, at}
+exams = read_json(EXAM_PATH, [])        # 考试：{id, name, classes, sessions: [{subject, date, start, end}], notice, creator, uid, created, ended: {"班级|场次": 时间戳}}
+exam_rev = [time.time()]                 # 考试安排改了就变：一体机轮询时看到变化马上重新拉看板
 quizzes = read_json(QUIZ_PATH, [])       # 学情：{id, class, title, date, questions: [题号], wrong: {题号: [姓名]}, source}
 attends = read_json(ATTEND_PATH, [])     # 考勤 {id, class, date, session, marks: {姓名: 类型}, ts}
 collects = read_json(COLLECT_PATH, [])   # 作业收交登记 {id, class, date, hw_id, subject, content, missing, ts}
@@ -222,8 +367,31 @@ settings.setdefault("board_points", True)
 settings.setdefault("quotes", {"enabled": True, "builtin": True, "custom": {}})
 settings.setdefault("my_classes", {})     # 老师称呼 -> 自己教的班级（没设置过的老师看到全部班级）
 users = read_json(USERS_PATH, {"users": {}, "acl": {}, "invites": {}})
-for _k in ("users", "acl", "invites", "class_keys"):
+for _k in ("users", "acl", "invites", "class_keys", "aliases"):  # aliases：改名前的班级名 -> 新名（一体机还用旧名连）
     users.setdefault(_k, {})
+users.setdefault("admins", [])  # 主管理员（用管理员密码登录的）指定的其他管理员：用自己的登录码登录，不用共用密码
+
+
+def is_owner(s):
+    """主管理员：用管理员密码登录的。只有主管理员能改密码、指定管理员、下载备份（备份里有 config.json）"""
+    return bool(s) and s["uid"] == "admin"
+
+
+def is_admin(s):
+    """管理员：主管理员，或者主管理员指定的老师"""
+    return bool(s) and (s["uid"] == "admin" or s["uid"] in users["admins"])
+
+
+def hash_pw(pw, salt):
+    return hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt), 200_000).hex()
+
+
+def check_password(pw):
+    """在工作台改过密码就用改过的（只存加盐散列，在 data/settings.json，部署不会覆盖）；没改过用 config.json 里的"""
+    h = settings.get("admin_pw")
+    if h:
+        return hmac.compare_digest(hash_pw(pw, h["salt"]), h["hash"])
+    return hmac.compare_digest(pw, CFG["teacher_password"])
 PUBLIC = bool(CFG.get("public"))         # 公共服务器（网友自助注册）；本校服务器没有这一项，行为不变
 if PUBLIC:  # 公共服务器上全局教室密钥作废，每个班都要有自己的密钥
     for _c in load_students():
@@ -233,6 +401,7 @@ sessions = {t: v for t, v in sessions.items() if v.get("uid")}  # 旧版"公共�
 settings.setdefault("cls_cfg", {})       # 班级 -> 大屏设置（倒计时、待机页、字体、每日一句……）
 pick_history = {}                        # 班级 -> 最近被抽到的名字（避免连续重复）
 last_seen = {}                           # 班级 -> 最近一次轮询时间
+shots, shot_req = {}, {}                 # 看大屏：班级 -> {img, type, at, err}（只在内存里，2 分钟后作废）；班级 -> 老师点"看一眼"的时间
 login_fails = {}                         # ip -> [失败次数, 首次失败时间]
 reg_counts = {}                          # ip -> [日期, 今天注册次数]
 send_log = {}                            # 老师 uid -> 最近一小时上大屏的时间戳（公共模式限频）
@@ -262,11 +431,13 @@ def make_chime():
 
 
 def make_speech(text, voice=None, repeat=None):
-    """用 edge-tts 生成自然人声 mp3，返回文件名；失败返回 None（教室端会退回本机语音）"""
-    try:
-        import edge_tts
-    except ImportError:
-        return None
+    """生成自然人声 mp3，返回文件名；失败返回 None（教室端会退回本机语音）。
+    有 tts.json 用腾讯云，否则用 edge-tts"""
+    if TC:
+        return make_speech_tc(text, voice, repeat)
+    if not EDGE:
+        return make_speech_local(text, voice, repeat)
+    import edge_tts
     voice = voice if voice in VOICE_IDS else CFG["tts_voice"]
     say = "。".join([text] * max(1, int(repeat or CFG["tts_repeat"])))
     name = hashlib.sha256((CFG["classroom_key"] + voice + CFG["tts_rate"] + say).encode()).hexdigest()[:24] + ".mp3"
@@ -282,7 +453,75 @@ def make_speech(text, voice=None, repeat=None):
         os.replace(path + ".tmp", path)
         return name
     except Exception as e:  # 断网、服务不可用等
-        print("语音生成失败，教室端将使用本机语音：", e)
+        print("语音生成失败，改用电脑自带语音：", e)
+        return make_speech_local(text, None, repeat)
+
+
+def default_voice():
+    if TC:
+        return TC_DEFAULT
+    if not EDGE and LOCAL_VOICES:
+        return LOCAL_VOICES[0]["id"]
+    return CFG["tts_voice"]
+
+
+def make_speech_local(text, voice=None, repeat=None):
+    """用电脑自带语音生成 wav（不联网）；这台电脑没有中文语音就返回 None（Windows 一体机会自己朗读）"""
+    if not LOCAL_VOICES:
+        return None
+    ids = {v["id"] for v in LOCAL_VOICES}
+    voice = voice if voice in ids else LOCAL_VOICES[0]["id"]
+    say = "。".join([text] * max(1, int(repeat or CFG["tts_repeat"])))
+    name = hashlib.sha256((CFG["classroom_key"] + voice + say).encode()).hexdigest()[:24] + ".wav"
+    path = os.path.join(AUDIO_DIR, name)
+    if os.path.exists(path):
+        return name
+    tmp = path[:-4] + ".tmp.wav"
+    if os.name == "nt":
+        ps = os.path.join(AUDIO_DIR, "sapi.ps1")
+        if not os.path.exists(ps):
+            with open(ps, "w", encoding="utf-8-sig") as f:
+                f.write(SAPI_PS)
+        txt = path[:-4] + ".txt"
+        with open(txt, "w", encoding="utf-8") as f:
+            f.write(say)
+        run_quiet(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps, voice[6:], tmp, txt], 60)
+        try:
+            os.remove(txt)
+        except OSError:
+            pass
+    else:
+        run_quiet(["say", "-v", voice[6:], "-r", "170", "--data-format=LEI16@16000", "-o", tmp, say], 60)
+    if os.path.exists(tmp) and os.path.getsize(tmp) > 1000:
+        os.replace(tmp, path)
+        return name
+    print("电脑自带语音生成失败，这条只响提示音")
+    return None
+
+
+def make_speech_tc(text, voice=None, repeat=None):
+    voice = voice if voice in VOICE_IDS else TC_DEFAULT
+    n = max(1, int(repeat or CFG["tts_repeat"]))
+    name = hashlib.sha256((CFG["classroom_key"] + voice + "x" + str(n) + text).encode()).hexdigest()[:24] + ".mp3"
+    path = os.path.join(AUDIO_DIR, name)
+    if os.path.exists(path):  # 同一句话同一个声音只合成一次，省钱
+        return name
+    d, limit = today(), int(TC.get("daily_chars") or 20000)
+    with lock:
+        if tc_used["day"] != d:
+            tc_used.update(day=d, chars=0)
+        if tc_used["chars"] + len(text) > limit:
+            print(f"语音：今天已合成 {tc_used['chars']} 字，超过每天上限 {limit}，这条不合成")
+            return None
+        tc_used["chars"] += len(text)
+    try:
+        once = b"".join(tencent_tts(c, voice) for c in tts_chunks(text + "。"))
+        with open(path + ".tmp", "wb") as f:
+            f.write(once * n)  # 读两遍：同一段 mp3 接两次（只付一遍的钱）
+        os.replace(path + ".tmp", path)
+        return name
+    except Exception as e:
+        print("腾讯云语音合成失败，教室端将使用本机语音：", e)
         return None
 
 
@@ -311,7 +550,7 @@ def period_status(dt=None, cls=None):
         t = dt.strftime("%H:%M")
         for i, (start, end) in enumerate(sch.get("periods", CFG["periods"])):
             if start <= t < end:
-                return {"in_class": True, "period": i + 1, "end": end}
+                return {"in_class": True, "period": i + 1, "end": end, "evening": start >= "18:00"}
     return {"in_class": False}
 
 
@@ -385,12 +624,17 @@ def today():
 
 
 def create_messages(classes, text, sender, voice=False, urgent=False, defer=False, voice_name=None,
-                    kind="call", data=None, expire_at=None, say=None, repeat=None, who=None):
-    """所有推送到教室大屏的内容（喊话、作业、提醒、课堂工具）都走这里"""
+                    kind="call", data=None, expire_at=None, say=None, repeat=None, who=None, loud=False, send_at=None):
+    """所有推送到教室大屏的内容（喊话、作业、提醒、课堂工具）都走这里；send_at：老师定时发送的时间"""
     now = time.time()
-    def deliver_time(cls):  # 上课时间的普通消息，等到这个班下课再送
+    def deliver_time(cls):  # 上课时间的普通消息，等到这个班下课再送（晚自习不等：值班老师要马上看到）
+        ex = exam_now(cls, send_at or now) if not urgent and kind not in ("uninstall", "standby") else None
+        if ex:  # 正在考试：普通消息、提醒等考完（结束后 5 分钟）再送；紧急消息照常
+            return ex["hide_at"]
+        if send_at:  # 定时发送：到点就送，上课时一体机照常只在角落显示
+            return send_at
         st = period_status(cls=cls)
-        if defer and not urgent and st["in_class"]:
+        if defer and not urgent and st["in_class"] and not st.get("evening"):
             end = datetime.strptime(st["end"], "%H:%M").time()
             return datetime.combine(now_cn().date(), end, CN).timestamp()
         return now
@@ -400,12 +644,17 @@ def create_messages(classes, text, sender, voice=False, urgent=False, defer=Fals
     with lock:
         nid = next_id(messages)
         for cls in classes:
-            deliver_at = max(deliver_at, deliver_time(cls))
+            if kind == "prep" and exam_now(cls, now):
+                continue  # 考试时不提醒"下节课带什么"
+            at = deliver_time(cls)
+            deliver_at = max(deliver_at, at)
             messages.append({"id": nid, "class": cls, "text": text, "sender": sender, "kind": kind,
                              "data": data, "voice": bool(voice), "urgent": bool(urgent), "audio": audio,
-                             "created": now, "deliver_at": deliver_time(cls), "expire_at": expire_at,
-                             "delivered_at": None, "acked_at": None, "who": who,
+                             "created": now, "deliver_at": at, "expire_at": expire_at,
+                             "delivered_at": None, "acked_at": None, "who": who, "loud": bool(loud and voice), "send_at": send_at,
                              "speak": "。".join([say or text] * max(1, int(repeat or CFG["tts_repeat"]))) if voice else None})
+            if at > now and not urgent and exam_now(cls, send_at or now):
+                messages[-1]["exam_hold"] = True  # 因为考试压住的：考试提前结束、删除时要放出来
             ids.append(nid)
             nid += 1
         save_messages()
@@ -475,6 +724,73 @@ def morning_window(cls):
     return t.strftime("%H:%M"), first
 
 
+EXAM_BEFORE, EXAM_AFTER = 15 * 60, 5 * 60  # 开考前 15 分钟整屏显示须知；结束后 5 分钟收起
+EXAM_NOTICE = "手机、智能手表等电子设备关机，放到讲台\n按考号对号入座，桌面只留准考证和文具\n答题卡用 2B 铅笔填涂，写清姓名、考号\n开考 15 分钟后不得进场，考试结束前不得离场"
+EXAM_VOICE = {"start": "考试开始，请开始答题", "warn": "距离考试结束还有十五分钟", "end": "考试结束，请停止作答"}
+
+
+def exam_sessions(cls, date=None):
+    """这个班某天（默认今天）的各场考试，按开考时间排好；每场带上大屏要用的时间戳"""
+    date = date or today()
+    out = []
+    for e in exams:
+        if cls not in e["classes"]:
+            continue
+        order = sorted(range(len(e["sessions"])), key=lambda i: (e["sessions"][i]["date"], e["sessions"][i]["start"]))
+        for n, i in enumerate(order):
+            x = e["sessions"][i]
+            if x["date"] != date:
+                continue
+            ts = lambda hm: datetime.combine(datetime.strptime(date, "%Y-%m-%d").date(), datetime.strptime(hm, "%H:%M").time(), CN).timestamp()
+            start, end = ts(x["start"]), ts(x["end"])
+            ended = (e.get("ended") or {}).get(f"{cls}|{i}")
+            nx = next((e["sessions"][j] for j in order[n + 1:]), None)
+            out.append({"key": f"{e['id']}-{i}", "exam_id": e["id"], "idx": i, "name": e["name"], "no": n + 1, "total": len(order),
+                        "subject": x["subject"], "date": date, "start": x["start"], "end": x["end"], "start_ts": start, "end_ts": end,
+                        "show_from": start - EXAM_BEFORE, "hide_at": min(end + EXAM_AFTER, ended) if ended else end + EXAM_AFTER,
+                        "ended": bool(ended), "notice": [l for l in (e.get("notice") or "").split("\n") if l.strip()],
+                        "next": {"subject": nx["subject"], "date": nx["date"], "start": nx["start"], "end": nx["end"]} if nx else None})
+    return sorted(out, key=lambda x: x["start_ts"])
+
+
+def exam_now(cls, now=None):
+    """这个班现在是不是在考试（开考前 15 分钟到结束后 5 分钟），是就返回那一场"""
+    now = now or time.time()
+    return next((x for x in exam_sessions(cls) if x["show_from"] <= now < x["hide_at"]), None)
+
+
+_exam_voice = {"at": 0, "urls": {}}
+
+
+def exam_voice():
+    """考试三句提示语的语音地址（合成一次就缓存；合成失败 10 分钟后再试，免得每次拉看板都卡住）"""
+    if not _exam_voice["urls"] or (len(_exam_voice["urls"]) < len(EXAM_VOICE) and time.time() - _exam_voice["at"] > 600):
+        _exam_voice["at"] = time.time()
+        urls = {}
+        for k, t in EXAM_VOICE.items():
+            a = make_speech(t)
+            if a:
+                urls[k] = "/audio/" + a
+        _exam_voice["urls"] = urls or {"_": None}
+    return {k: v for k, v in _exam_voice["urls"].items() if v}
+
+
+def save_exams():
+    """考试安排改了（调用时已持有 lock）：通知一体机重新拉看板；被考试压住的消息按新安排重新算发送时间"""
+    exam_rev[0] = now = time.time()
+    write_json(EXAM_PATH, exams)
+    moved = False
+    for m in messages:
+        if m.get("exam_hold") and m["deliver_at"] > now:
+            start = max(now, m.get("send_at") or 0)  # 定时发送的不能早于老师定的时间
+            ex = exam_now(m["class"], start)
+            at = ex["hide_at"] if ex else start
+            if at != m["deliver_at"]:
+                m["deliver_at"], moved = at, True
+    if moved:
+        save_messages()
+
+
 def morning_of(cls, date=None):
     date = date or today()
     return sorted((m for m in mornings if m["class"] == cls and m["date"] == date), key=lambda m: m.get("created", 0))
@@ -484,6 +800,19 @@ def notes_of(cls):
     """这个班还没过期的大屏留言（先发的在前）"""
     d = today()
     return [n for n in notes if n["class"] == cls and (not n.get("until") or n["until"] >= d)]
+
+
+def migrate_notices():
+    """10-23 起「班级公告」并进大屏留言：旧公告搬成一条"一直显示"的留言（启动时跑一次）"""
+    old = {c: t for c, t in settings.get("notices", {}).items() if t.strip()}
+    if not old:
+        return
+    for c, t in old.items():
+        notes.append({"id": next_id(notes), "class": c, "text": re.sub(r"\s+", " ", t).strip(), "subject": "", "teacher": "班主任",
+                      "uid": "", "created": time.time(), "until": ""})
+    settings["notices"] = {}
+    write_json(NOTES_PATH, notes)
+    write_json(SETTINGS_PATH, settings)
 
 
 def note_by(n):
@@ -743,6 +1072,84 @@ def class_key(cls):
     return users["class_keys"].get(cls) or (None if PUBLIC else CFG["classroom_key"])
 
 
+def purge_files(cls=None):
+    """删掉过期（7 天）的文件；给了 cls 就把这个班的文件全删（调用时已持有 lock）"""
+    cutoff = time.time() - FILE_KEEP_DAYS * 86400
+    keep = []
+    for f in files:
+        if f["at"] < cutoff or (cls and f["class"] == cls):
+            try:
+                os.remove(os.path.join(FILE_DIR, f["id"]))
+            except OSError:
+                pass
+        else:
+            keep.append(f)
+    if len(keep) != len(files):
+        gone = {f["id"] for f in files} - {f["id"] for f in keep}
+        files[:] = keep
+        write_json(FILE_PATH, files)
+        hit = False
+        for m in messages:  # 文件删了，大屏上还没点开的那条也撤回，免得一体机去下载一个已经没有的文件
+            if m.get("kind") == "file" and (m.get("data") or {}).get("file") in gone and not m.get("recalled"):
+                m["recalled"] = hit = True
+        if hit:
+            save_messages()
+
+
+def resolve_class(cls):
+    """一体机、登记页里写的可能是改名前的班级名：换成现在的名字"""
+    for _ in range(5):
+        if cls not in users["aliases"] or cls in load_students():
+            break
+        cls = users["aliases"][cls]
+    return cls
+
+
+def rename_class(old, new):
+    """改班级名：成员、密钥、邀请码、设置和全部记录（作业、消息、考勤、积分……）都跟着改（调用时已持有 lock）"""
+    for d in (users["acl"], users["class_keys"]):
+        if old in d:
+            d[new] = d.pop(old)
+    for inv in users["invites"].values():
+        if inv["class"] == old:
+            inv["class"] = new
+    al = users["aliases"]
+    for k in [k for k, v in al.items() if v == old]:
+        al[k] = new
+    al[old] = new
+    al.pop(new, None)
+    save_users()
+    for items, path in ((messages, MSG_PATH), (homework, HOMEWORK_PATH), (collects, COLLECT_PATH), (attends, ATTEND_PATH),
+                        (points, POINTS_PATH), (quizzes, QUIZ_PATH), (mornings, MORNING_PATH), (notes, NOTES_PATH), (files, FILE_PATH)):
+        for x in items:
+            if x.get("class") == old:
+                x["class"] = new
+        write_json(path, items)
+    for r in reminders:
+        r["classes"] = [new if c == old else c for c in r["classes"]]
+    write_json(REMINDER_PATH, reminders)
+    for e in exams:
+        if old in e.get("classes", []):
+            e["classes"] = [new if c == old else c for c in e["classes"]]
+            e["ended"] = {(new + k[len(old):] if k.startswith(old + "|") else k): v for k, v in (e.get("ended") or {}).items()}
+    write_json(EXAM_PATH, exams)
+    for key in ("notices", "duty", "cls_cfg", "timetable", "class_schedule"):
+        if old in settings.get(key, {}):
+            settings[key][new] = settings[key].pop(old)
+    custom = settings.get("quotes", {}).get("custom", {})
+    if old in custom:
+        custom[new] = custom.pop(old)
+    for i in settings.get("recent_images", []):
+        if i.get("class") == old:
+            i["class"] = new
+    for name, cl in settings.get("my_classes", {}).items():
+        settings["my_classes"][name] = [new if c == old else c for c in cl]
+    write_json(SETTINGS_PATH, settings)
+    for d in (last_seen, pick_history):
+        if old in d:
+            d[new] = d.pop(old)
+
+
 def drop_class(cls):
     """删班：这个班的名单、成员、密钥、消息、作业、考勤、积分、错题、提醒、设置全部清掉（调用时已持有 lock）"""
     roster = read_json(ROSTER_PATH, {})
@@ -752,6 +1159,8 @@ def drop_class(cls):
     write_json(ROSTER_PATH, roster)
     users["acl"].pop(cls, None)
     users["class_keys"].pop(cls, None)
+    for k in [k for k, v in users["aliases"].items() if v == cls]:
+        users["aliases"].pop(k)
     for code in [k for k, v in users["invites"].items() if v["class"] == cls]:
         users["invites"].pop(code)
     save_users()
@@ -770,6 +1179,7 @@ def drop_class(cls):
     write_json(SETTINGS_PATH, settings)
     last_seen.pop(cls, None)
     pick_history.pop(cls, None)
+    purge_files(cls)
 
 
 def ccfg(cls):
@@ -777,7 +1187,7 @@ def ccfg(cls):
     q = settings.get("quotes", {})
     base = {"countdowns": settings.get("countdowns", [{"name": "高考", "date": "2027-06-07"}]),
             "standby": settings.get("standby", {"enabled": True, "idle_minutes": 5}),
-            "screen_font": settings.get("screen_font", "wenkai"), "board_points": settings.get("board_points", True),
+            "screen_font": settings.get("screen_font", "wenkai"), "board_points": settings.get("board_points", True), "eve_plan": [], "tools_tab": True,
             "quotes": {"enabled": q.get("enabled", True), "builtin": q.get("builtin", True),
                        "custom": q.get("custom", {}).get(cls, [])}}
     own = settings.get("cls_cfg", {}).get(cls, {})
@@ -792,7 +1202,7 @@ def subjects_of(cls):
 
 
 def make_backup():
-    """把所有数据打包成 backups/data-日期-时间.tgz，保留最近 30 天。语音、缩略图是可重新生成的缓存，不备份"""
+    """把所有数据打包成 backups/data-日期-时间.tgz，保留最近 30 天。语音、缩略图是可重新生成的缓存，发到大屏的文件只留 7 天，都不备份"""
     import tarfile
     os.makedirs(BACKUP_DIR, exist_ok=True)
     name = f"data-{now_cn().strftime('%Y%m%d-%H%M%S')}.tgz"
@@ -800,7 +1210,7 @@ def make_backup():
 
     def skip_cache(info):
         rel = info.name.replace("\\", "/")
-        if rel.startswith("data/audio") or re.search(r"data/images/.+_\d+x\d+\.(png|gif)$", rel) or rel.endswith(".tmp"):
+        if rel.startswith(("data/audio", "data/files/")) or re.search(r"data/images/.+_\d+x\d+\.(png|gif)$", rel) or rel.endswith(".tmp"):
             return None
         return info
     with lock:  # 打包时不让别的请求写数据，保证备份是完整的
@@ -904,11 +1314,25 @@ def reminder_loop():
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "ClassCall/1.0"
+    timeout = 60  # 连上来 60 秒没发数据就断开：手机浏览器预先开的空连接在学校网络里断了服务器察觉不到，不设就会越攒越多，到上限后打不开文件
 
     def log_message(self, fmt, *args):
         pass  # 轮询请求太多，不打印访问日志
 
     # ---------- 工具 ----------
+    def host(self):
+        """本服务器的地址（写进二维码、安装命令）。在服务器电脑上用 localhost 打开工作台时，换成局域网地址，
+        不然手机和一体机拿到的是 localhost，连不上"""
+        h = self.headers.get("Host", "")
+        name, sep, port = h.rpartition(":") if not h.endswith("]") else (h, "", "")
+        if not sep:
+            name, port = h, ""
+        if name in ("localhost", "127.0.0.1", "[::1]"):
+            ip = lan_ips()[0]
+            if ip != "127.0.0.1":
+                return ip + (":" + port if port else "")
+        return h
+
     def send_json(self, data, code=200):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
@@ -987,7 +1411,7 @@ class Handler(BaseHTTPRequestHandler):
         s = self.sess()
         if not s:
             return None
-        if s["uid"] == "admin":
+        if is_admin(s):
             return "admin"
         acl = users["acl"].get(cls, {})
         return "head" if s["uid"] in acl.get("heads", []) else "teacher" if s["uid"] in acl.get("teachers", []) else None
@@ -1000,17 +1424,17 @@ class Handler(BaseHTTPRequestHandler):
         return [c for c in load_students() if self.role(c)]
 
     def deny(self, level="teacher"):
-        return self.send_json({"error": "只能删除自己发的留言" if level == "own" else "这个操作只有班主任可以做" if level == "head" else
+        return self.send_json({"error": "只能删除自己发的内容" if level == "own" else "这个操作只有主管理员（用管理员密码登录）可以做" if level == "owner" else "这个操作只有班主任可以做" if level == "head" else
                                "管理员才能做这个操作" if level == "admin" else "你不是这个班的老师"}, 403)
 
     def post_check(self, path, body):
         """POST 接口的权限检查：返回 None 表示通过，否则返回 (级别) 表示拒绝"""
         s = self.sess()
-        is_admin = s and s["uid"] == "admin"
+        admin, owner = is_admin(s), is_owner(s)
         cls_of = lambda items, key="id": next((x["class"] for x in items if x["id"] == body.get(key)), None)
         teacher_level = {"/api/board/show", "/api/homework/add", "/api/morning/add", "/api/notes/add", "/api/homework/push", "/api/collect/start", "/api/collect/remind",
                          "/api/tools/timer", "/api/tools/pick", "/api/image/push", "/api/quiz/import", "/api/quiz/save"}
-        head_level = {"/api/points/add", "/api/duty/push", "/api/attend/start", "/api/settings", "/api/classroom/uninstall"}
+        head_level = {"/api/screen/shot", "/api/points/add", "/api/duty/push", "/api/attend/start", "/api/settings", "/api/classroom/uninstall"}
         if path in teacher_level:
             return None if self.allowed(str(body.get("class") or ""), "teacher") else "teacher"
         if path in head_level:
@@ -1023,6 +1447,15 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/notes/delete":  # 自己的留言自己删；班主任能删本班所有留言
             n = next((x for x in notes if x["id"] == body.get("id")), None)
             return None if n and (self.allowed(n["class"], "head") or (s and n.get("uid") == s["uid"])) else "own"
+        if path == "/api/files/delete":  # 自己发的自己删；班主任能删本班全部
+            f = next((x for x in files if x["id"] == body.get("id")), None)
+            return None if f and (self.allowed(f["class"], "head") or (s and f.get("uid") == s["uid"])) else "own"
+        if path in ("/api/exams/save", "/api/exams/delete"):  # 管理员可以一次发多个班；班主任只能管自己的班
+            old = next((e for e in exams if e["id"] == body.get("id")), None)
+            want = [str(c) for c in (body.get("classes") or [])] if path.endswith("save") else []
+            return None if all(self.allowed(c, "head") for c in want + (old["classes"] if old else [])) else "head"
+        if path == "/api/exams/end":  # 本班老师（如监考老师）都能提前结束
+            return None if self.allowed(str(body.get("class") or ""), "teacher") else "teacher"
         if path == "/api/morning/delete":
             c = cls_of(mornings)
             return None if c and self.allowed(c, "teacher") else "teacher"
@@ -1051,21 +1484,21 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/roster/save":
             target = str(body.get("old") or body.get("class") or "")
             exists = target in load_students()
-            if body.get("old") and body.get("old") != body.get("class") and not is_admin:
-                return "admin"  # 改班级名只有管理员能做
-            return None if (exists and self.allowed(target, "head")) or is_admin else ("head" if exists else "admin")
+            return None if (exists and self.allowed(target, "head")) or admin else ("head" if exists else "admin")
         if path == "/api/schedule":  # 全校作息只有管理员能改；本班作息班主任也能改
             if body.get("scope") == "class":
                 return None if self.allowed(str(body.get("class") or ""), "head") else "head"
-            return None if is_admin else "admin"
+            return None if admin else "admin"
         if path == "/api/roster/delete":  # 公共服务器上班主任可以删自己的班
-            return None if is_admin or (PUBLIC and self.role(str(body.get("class") or "")) == "head") else "admin"
-        if path in ("/api/backup/now", "/api/register/code"):
-            return None if is_admin else "admin"
+            return None if admin or (PUBLIC and self.role(str(body.get("class") or "")) == "head") else "admin"
+        if path in ("/api/backup/now", "/api/register/code", "/api/admin/password", "/api/admins/set"):
+            return None if owner else "owner"
         if path == "/api/invites/new":
             if body.get("role") == "head":
-                return None if is_admin else "admin"
+                return None if admin else "admin"
             return None if self.allowed(str(body.get("class") or ""), "head") else "head"
+        if path == "/api/members/role":  # 班主任和任课老师互换：只有管理员能做（免得班主任之间互相降）
+            return None if admin else "admin"
         if path == "/api/members/remove":
             return None if self.allowed(str(body.get("class") or ""), "head") else "head"
         return None  # 其余（上传图片、试听、常用语、解析名单……）登录即可
@@ -1089,6 +1522,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
+        if q.get("class") and users["aliases"]:
+            q["class"] = [resolve_class(q["class"][0])]
         if u.path in ("/", "/index.html"):
             return self.send_file("index.html")
         if u.path in ("/classroom", "/classroom.html"):
@@ -1118,6 +1553,19 @@ class Handler(BaseHTTPRequestHandler):
                                    "homework": [{**h, "due_date": due_date(h), "collect": collect_of(cls, h["id"])} for h in items],
                                    "today": today(), "yesterday": (now_cn() - timedelta(days=1)).strftime("%Y-%m-%d"),
                                    "subjects": subjects_of(cls)})
+        if u.path.startswith("/files/"):  # 一体机下载老师发来的文件（按班校验密钥）
+            fid = os.path.basename(u.path)
+            f = next((x for x in files if x["id"] == fid), None)
+            path = os.path.join(FILE_DIR, fid)
+            if not f or not self.classroom_ok(q, f["class"]) or not os.path.isfile(path):
+                return self.send_json({"error": "not found"}, 404)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(os.path.getsize(path)))
+            self.end_headers()
+            with open(path, "rb") as fh:
+                shutil.copyfileobj(fh, self.wfile, 1024 * 1024)
+            return
         if u.path.startswith("/img/"):
             name = os.path.basename(u.path)
             path = os.path.join(IMG_DIR, name)
@@ -1157,7 +1605,7 @@ class Handler(BaseHTTPRequestHandler):
             with open(path, "rb") as f:
                 body = f.read()
             if u.path.endswith((".sh", ".ps1")):  # 填上本服务器地址，别的学校自己搭的服务器也能直接用
-                body = body.replace(b"__SERVER__", f"http://{self.headers.get('Host', '')}".encode())
+                body = body.replace(b"__SERVER__", f"http://{self.host()}".encode())
             if u.path.endswith(".ps1"):  # Windows 安装命令把班级、密钥放在网址里（PowerShell 单引号字符串，' 要写成 ''）
                 ps = lambda k: (q.get(k) or [""])[0].replace("'", "''").replace("\r", "").replace("\n", "")
                 body = body.replace(b"'__CLASS__'", f"'{ps('c')}'".encode()).replace(b"'__KEY__'", f"'{ps('k')}'".encode())
@@ -1168,6 +1616,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.wfile.write(body)
         if u.path.startswith("/dist/"):  # 给其他学校自己搭服务器用的安装包（只有程序，没有任何数据和密码）
             name = os.path.basename(u.path)
+            pyexe = os.path.join(BASE, "dist", "python", name)
+            if re.fullmatch(r"python-3\.\d+\.\d+(-amd64)?\.exe", name) and os.path.isfile(pyexe):
+                # 局域网版：Windows 一体机安装时从这里下载 Python，学校不通外网也能装
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(os.path.getsize(pyexe)))
+                self.end_headers()
+                with open(pyexe, "rb") as f:
+                    return shutil.copyfileobj(f, self.wfile)
             if name == "myip":
                 body = self.client_address[0].encode()
             elif name in ("setup.sh", "class-assistant.tar.gz") and os.path.exists(os.path.join(BASE, "dist", name)):
@@ -1202,9 +1659,9 @@ class Handler(BaseHTTPRequestHandler):
             if not PUBLIC:
                 return self.send_json({"error": "not found"}, 404)
             s = self.sess()
-            if not s or s["uid"] != "admin":
-                return self.deny("admin")
-            return self.send_json({"url": f"http://{self.headers.get('Host', '')}/register", "code": settings.get("register_code", ""),
+            if not is_owner(s):
+                return self.deny("owner")
+            return self.send_json({"url": f"http://{self.host()}/register", "code": settings.get("register_code", ""), "paused": bool(settings.get("register_paused")),
                                    "classes": len(load_students()), "teachers": len(users["users"])})
         if u.path == "/kylin/version":
             with open(os.path.join(BASE, "kylin", "receiver.py"), "rb") as f:
@@ -1215,6 +1672,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.api_board(q)
         if u.path in ("/join", "/join.html", "/login"):
             return self.send_file("join.html")
+        if u.path == "/app":  # 添加到手机桌面（带个人登录码）
+            return self.send_file("app.html")
         if u.path == "/api/join/info":
             inv = users["invites"].get((q.get("c") or [""])[0])
             if not inv or inv["class"] not in load_students():
@@ -1239,22 +1698,42 @@ class Handler(BaseHTTPRequestHandler):
             students = load_students()
             mine = self.my_classes()
             return self.send_json({"classes": [{"name": c, "students": students[c]} for c in mine],
-                                   "roles": {c: self.role(c) for c in mine}, "admin": s["uid"] == "admin",
+                                   "roles": {c: self.role(c) for c in mine}, "admin": is_admin(s), "owner": is_owner(s),
                                    "me": s["name"], "mine": None, "public": PUBLIC,
                                    "no_schedule": [c for c in mine if c not in settings.get("class_schedule", {})] if PUBLIC else [],
                                    "places": CFG["places"], "voices": VOICES,
-                                   "default_voice": CFG["tts_voice"], "subjects": CFG["subjects"],
+                                   "default_voice": default_voice(), "subjects": CFG["subjects"],
                                    "class_subjects": {c: subjects_of(c) for c in mine},
                                    "homework_limit": CFG["homework_limit_minutes"]})
         if not self.teacher():
             return self.send_json({"error": "请先登录"}, 401)
         qcls = (q.get("class") or [""])[0]
-        if u.path in ("/api/homework", "/api/quiz", "/api/morning", "/api/notes") and not self.allowed(qcls, "teacher"):
+        if u.path in ("/api/homework", "/api/quiz", "/api/morning", "/api/notes", "/api/files", "/api/exams") and not self.allowed(qcls, "teacher"):
             return self.deny()
-        if u.path in ("/api/settings", "/api/points", "/api/attend") and not self.allowed(qcls, "head"):
+        if u.path in ("/api/settings", "/api/points", "/api/attend", "/api/screen/shot", "/api/screen/shot.img") and not self.allowed(qcls, "head"):
             return self.deny("head")
-        if u.path.startswith("/api/backup/") and self.sess()["uid"] != "admin":
-            return self.deny("admin")
+        if u.path == "/api/screen/shot":  # 看大屏：截图到了没有
+            sh = shots.get(qcls) or {}
+            fresh = time.time() - sh.get("at", 0) < 120
+            return self.send_json({"at": sh.get("at") if fresh else None, "err": sh.get("err") if fresh else None,
+                                   "online": time.time() - last_seen.get(qcls, 0) < 15})
+        if u.path == "/api/screen/shot.img":
+            sh = shots.get(qcls) or {}
+            if not sh.get("img") or time.time() - sh["at"] >= 120:
+                return self.send_json({"error": "没有截图"}, 404)
+            self.send_response(200)
+            self.send_header("Content-Type", sh["type"])
+            self.send_header("Content-Length", str(len(sh["img"])))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(sh["img"])
+            return
+        if u.path.startswith("/api/backup/") and not is_owner(self.sess()):
+            return self.deny("owner")
+        if u.path == "/api/admins":
+            if not is_owner(self.sess()):
+                return self.deny("owner")
+            return self.send_json(self.admin_info())
         if u.path == "/api/export":
             if not self.allowed(qcls, "teacher"):
                 return self.deny()
@@ -1272,19 +1751,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self.deny()
             own = settings.get("class_schedule", {}).get(qcls)
             return self.send_json({**schedule_of(qcls), "own": bool(own), "school": school_schedule(),
-                                   "admin": self.sess()["uid"] == "admin", "can_class": bool(qcls) and self.allowed(qcls, "head")})
+                                   "admin": is_admin(self.sess()), "can_class": bool(qcls) and self.allowed(qcls, "head")})
         if u.path == "/api/me":
             s = self.sess()
             u_ = users["users"].get(s["uid"])
-            link = f"http://{self.headers.get('Host', '')}/login?u={s['uid']}&k={u_['secret']}" if u_ else None
-            return self.send_json({"name": s["name"], "admin": s["uid"] == "admin", "login_url": link})
+            link = f"http://{self.host()}/login?u={s['uid']}&k={u_['secret']}" if u_ else None
+            return self.send_json({"name": s["name"], "admin": is_admin(s), "owner": is_owner(s), "login_url": link})
         if u.path == "/api/invites":
             if not self.allowed(qcls, "head"):
                 return self.deny("head")
-            host = self.headers.get("Host", "")
+            host = self.host()
             codes = {inv["role"]: f"http://{host}/join?c={code}" for code, inv in users["invites"].items() if inv["class"] == qcls}
             acl = users["acl"].get(qcls, {})
-            who = lambda ids: [{"uid": i, "name": users["users"].get(i, {}).get("name", "?")} for i in ids]
+            who = lambda ids: [{"uid": i, "name": users["users"].get(i, {}).get("name", "?"),  # 同名的老师靠加入日期区分
+                                "since": datetime.fromtimestamp(users["users"].get(i, {}).get("created", 0), CN).strftime("%m-%d")} for i in ids]
             return self.send_json({"head": codes.get("head"), "teacher": codes.get("teacher"),
                                    "heads": who(acl.get("heads", [])), "teachers": who(acl.get("teachers", []))})
         if u.path == "/api/notes":
@@ -1293,6 +1773,22 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"items": [{**n, "by": note_by(n), "mine": n.get("uid") == s["uid"], "can_delete": head or n.get("uid") == s["uid"]}
                                              for n in notes_of(qcls)],
                                    "notice": settings.get("notices", {}).get(qcls, "")})
+        if u.path == "/api/exams":
+            now, d = time.time(), today()
+            week_ago = (now_cn() - timedelta(days=7)).strftime("%Y-%m-%d")
+            items = []
+            for e in exams:
+                if qcls not in e["classes"] or max(x["date"] for x in e["sessions"]) < week_ago:
+                    continue  # 只列这个班的、还没考完的（考完一周内的也留着看）
+                live = {x["idx"]: x for x in exam_sessions(qcls) if x["exam_id"] == e["id"]}
+                items.append({"id": e["id"], "name": e["name"], "classes": e["classes"], "notice": e.get("notice", ""), "creator": e.get("creator", ""),
+                              "can_edit": all(self.allowed(c, "head") for c in e["classes"]),
+                              "sessions": [{**x, "idx": i, "state": ("ended" if (e.get("ended") or {}).get(f"{qcls}|{i}") else
+                                                                     "live" if i in live and live[i]["show_from"] <= now < live[i]["hide_at"] else
+                                                                     "done" if x["date"] < d or (i in live and now >= live[i]["hide_at"]) else "todo")}
+                                           for i, x in enumerate(e["sessions"])]})
+            items.sort(key=lambda e: min((x["date"], x["start"]) for x in e["sessions"]))
+            return self.send_json({"items": items, "default_notice": EXAM_NOTICE})
         if u.path == "/api/morning":
             d1 = today()
             d2 = next_school_day(qcls, d1)
@@ -1314,7 +1810,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/settings":  # 只返回这个班的设置（形状和以前一样，前端不用大改）
             c = ccfg(qcls)
             return self.send_json({"countdowns": c["countdowns"], "standby": c["standby"], "screen_font": c["screen_font"],
-                                   "board_points": c["board_points"],
+                                   "board_points": c["board_points"], "eve_plan": c["eve_plan"], "tools_tab": c["tools_tab"],
                                    "quotes": {"enabled": c["quotes"]["enabled"], "builtin": c["quotes"]["builtin"],
                                               "custom": {qcls: c["quotes"]["custom"]}},
                                    "notices": {qcls: settings.get("notices", {}).get(qcls, "")},
@@ -1339,18 +1835,27 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return self.wfile.write(body)
         if u.path == "/api/roster":
-            cmd = f"wget -qO- {self.headers.get('Host', '')}/kylin/install.sh | bash -s {{班级}} {{密钥}}"
+            cmd = f"wget -qO- {self.host()}/kylin/install.sh | bash -s {{班级}} {{密钥}}"
             win = ("powershell -nop -c \"iex ([Text.Encoding]::UTF8.GetString((New-Object Net.WebClient).DownloadData("  # 不能带 $：在 PowerShell 窗口里粘贴时外层会先把 $变量 替换掉
-                   f"'http://{self.headers.get('Host', '')}/kylin/install.ps1?c={{班级}}&k={{密钥}}')))\"")
-            host = self.headers.get('Host', '')
+                   f"'http://{self.host()}/kylin/install.ps1?c={{班级}}&k={{密钥}}')))\"")
+            host = self.host()
             unwin = f"powershell -nop -c \"iex ([Text.Encoding]::UTF8.GetString((New-Object Net.WebClient).DownloadData('http://{host}/kylin/uninstall.ps1')))\""
             mine = {c: v for c, v in load_students().items() if self.allowed(c, "head")}
             return self.send_json({"classes": [{"name": c, "count": len(v), "names": [x["name"] for x in v], "role": self.role(c)}
                                                for c, v in mine.items()], "install": cmd, "install_win": win,
                                    "uninstall": f"wget -qO- {host}/kylin/uninstall.sh | bash", "uninstall_win": unwin,
                                    "keys": {c: class_key(c) or "" for c in mine},
-                                   "admin": self.sess()["uid"] == "admin", "public": PUBLIC,
+                                   "admin": is_admin(self.sess()), "public": PUBLIC,
                                    "online": {c: time.time() - last_seen.get(c, 0) < 15 for c in mine}})
+        if u.path == "/api/files":
+            uid, head = self.sess()["uid"], self.allowed(qcls, "head")
+            with lock:
+                purge_files()
+                items = [{"id": f["id"], "name": f["name"], "size": f["size"], "by": f["by"],
+                          "time": datetime.fromtimestamp(f["at"], CN).strftime("%m-%d %H:%M"),
+                          "can_delete": head or f.get("uid") == uid} for f in files if f["class"] == qcls][::-1]
+            return self.send_json({"items": items, "max_mb": FILE_MAX // 1024 // 1024, "keep_days": FILE_KEEP_DAYS,
+                                   "exts": sorted(FILE_EXTS)})
         if u.path == "/api/quiz":
             cls = (q.get("class") or [""])[0]
             return self.send_json({"items": [x for x in quizzes if x["class"] == cls][::-1][:30],
@@ -1377,7 +1882,18 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
+        if u.path == "/api/files/upload":  # 请求体是文件本身，不是 JSON
+            return self.api_file_upload(q)
+        if u.path == "/api/screen/shot/upload":  # 一体机传上来的屏幕截图（请求体是图片本身）
+            return self.api_shot_upload(q)
         body = self.read_body()
+        if users["aliases"] and u.path != "/api/roster/save":  # 改过名的班：旧名字换成新名字（roster/save 的 class 是新名字，不能换）
+            if q.get("class"):
+                q["class"] = [resolve_class(q["class"][0])]
+            if isinstance(body, dict) and isinstance(body.get("class"), str):
+                body["class"] = resolve_class(body["class"])
+            if isinstance(body, dict) and isinstance(body.get("classes"), list):
+                body["classes"] = [resolve_class(c) if isinstance(c, str) else c for c in body["classes"]]
         if u.path == "/api/login":
             return self.api_login(body)
         if u.path == "/api/join":
@@ -1389,6 +1905,15 @@ class Handler(BaseHTTPRequestHandler):
             if not m or not self.classroom_ok(q, m["class"]):
                 return self.send_json({"error": "密钥错误"}, 403)
             return self.api_ack(body)
+        if u.path == "/api/screen/tool":  # 一体机右边的「工具」：老师在大屏上直接点计时、抽号
+            cls = str(body.get("class") or "")
+            if not self.classroom_ok(q, cls):
+                return self.send_json({"error": "密钥错误"}, 403)
+            if not ccfg(cls)["tools_tab"]:
+                return self.send_json({"error": "班主任已关闭大屏工具"}, 403)
+            if body.get("tool") == "timer":
+                return self.api_timer({"class": cls, "seconds": body.get("seconds")}, "大屏")
+            return self.api_pick({"class": cls, "voice": True}, "大屏")
         if u.path == "/api/collect/save":
             if not self.classroom_ok(q, body.get("class")):
                 return self.send_json({"error": "密钥错误"}, 403)
@@ -1408,7 +1933,7 @@ class Handler(BaseHTTPRequestHandler):
         if level:
             return self.deny(level)
         uid = self.sess()["uid"]
-        n = self.screen_count(u.path, body) if PUBLIC and uid != "admin" else 0
+        n = self.screen_count(u.path, body) if PUBLIC and not is_admin(self.sess()) else 0
         if n:  # 公共模式：每位老师每小时最多往大屏发 60 条
             now = time.time()
             with lock:
@@ -1423,9 +1948,10 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/preview":
             audio = make_speech(str(body.get("text") or "请高二3班张伟同学到物理办公室")[:200], body.get("voice_name"), 1)
             if not audio:
-                return self.send_json({"error": "自然人声暂不可用（检查网络或是否安装 edge-tts）"}, 503)
+                return self.send_json({"error": "自然人声暂不可用（腾讯云语音没配好，或没装 edge-tts）" if not TC else "腾讯云语音合成失败，请看服务器日志"}, 503)
             return self.send_json({"audio": "/audio/" + audio})
         handler = {
+            "/api/me/name": self.api_me_name, "/api/screen/shot": self.api_shot_request,
             "/api/homework/add": self.api_homework_add, "/api/homework/delete": self.api_homework_delete,
             "/api/homework/push": self.api_homework_push, "/api/reminders/save": self.api_reminder_save,
             "/api/reminders/delete": self.api_reminder_delete, "/api/phrases/add": self.api_phrase_add,
@@ -1439,11 +1965,14 @@ class Handler(BaseHTTPRequestHandler):
             "/api/quiz/delete": self.api_quiz_delete, "/api/quiz/import": self.api_quiz_import,
             "/api/roster/save": self.api_roster_save, "/api/roster/delete": self.api_roster_delete,
             "/api/roster/parse": self.api_roster_parse, "/api/invites/new": self.api_invite_new,
-            "/api/members/remove": self.api_member_remove, "/api/schedule": self.api_schedule,
+            "/api/members/remove": self.api_member_remove, "/api/members/role": self.api_member_role, "/api/schedule": self.api_schedule,
             "/api/board/show": self.api_board_show, "/api/register/code": self.api_register_code,
             "/api/classroom/uninstall": self.api_classroom_uninstall,
             "/api/morning/add": self.api_morning_add, "/api/morning/delete": self.api_morning_delete,
+            "/api/exams/save": self.api_exam_save, "/api/exams/delete": self.api_exam_delete, "/api/exams/end": self.api_exam_end,
             "/api/notes/add": self.api_note_add, "/api/notes/delete": self.api_note_delete,
+            "/api/files/delete": self.api_file_delete,
+            "/api/admin/password": self.api_admin_password, "/api/admins/set": self.api_admins_set,
             "/api/backup/now": lambda body, sender: self.send_json({"ok": True, "name": make_backup(), "items": list_backups()}),
         }.get(u.path)
         if handler:
@@ -1463,7 +1992,7 @@ class Handler(BaseHTTPRequestHandler):
         if fails and fails[0] >= 5 and time.time() - fails[1] < 600:
             return self.send_json({"error": "密码错误次数过多，请 10 分钟后再试"}, 429)
         name = str(body.get("name") or "").strip()[:20]
-        if not hmac.compare_digest(str(body.get("password") or ""), CFG["teacher_password"]):
+        if not check_password(str(body.get("password") or "")):
             if not fails or time.time() - fails[1] >= 600:
                 login_fails[ip] = [1, time.time()]
             else:
@@ -1519,7 +2048,7 @@ class Handler(BaseHTTPRequestHandler):
         code = str(body.get("code") or "").strip()
         cls = re.sub(r"\s+", "", str(body.get("class") or ""))
         want = settings.get("register_code") or ""
-        if not want:
+        if not want or settings.get("register_paused"):
             return self.send_json({"error": "暂未开放注册"}, 403)
         if not hmac.compare_digest(code.encode(), want.encode()):
             return self.send_json({"error": "注册码不对，请看公众号自动回复里的最新注册码"}, 403)
@@ -1531,7 +2060,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"error": "班级名称只能用汉字、字母、数字"}, 400)
         ip, d = self.client_ip(), today()
         s = self.sess()
-        if s and s["uid"] == "admin":
+        if is_admin(s):
             return self.send_json({"error": "管理员请在工作台「班级管理」里建班"}, 400)
         with lock:
             rc = reg_counts.get(ip)
@@ -1562,6 +2091,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"ok": True, "token": token, "name": name, "class": cls})
 
     def api_register_code(self, body, sender):
+        if "paused" in body:  # 管理员暂停/恢复注册，注册码不变
+            with lock:
+                settings["register_paused"] = bool(body["paused"])
+                write_json(SETTINGS_PATH, settings)
+            return self.send_json({"ok": True, "paused": settings["register_paused"]})
         code = str(body.get("code") or "").strip()
         if not re.fullmatch(r"[A-Za-z0-9]{4,20}", code):
             return self.send_json({"error": "注册码要 4–20 位字母或数字"}, 400)
@@ -1589,7 +2123,7 @@ class Handler(BaseHTTPRequestHandler):
             code = secrets.token_urlsafe(8)
             users["invites"][code] = {"class": cls, "role": role, "by": sender, "created": time.time()}
             save_users()
-        self.send_json({"ok": True, "url": f"http://{self.headers.get('Host', '')}/join?c={code}"})
+        self.send_json({"ok": True, "url": f"http://{self.host()}/join?c={code}"})
 
     def api_schedule(self, body, sender):
         cls = str(body.get("class") or "")
@@ -1682,6 +2216,65 @@ class Handler(BaseHTTPRequestHandler):
         create_messages([cls], "远程卸载一体机", sender, kind="uninstall", urgent=True, expire_at=time.time() + 7 * 86400)
         self.send_json({"ok": True, "online": time.time() - last_seen.get(cls, 0) < 15})
 
+    def admin_info(self):
+        """主管理员看的：其他管理员、可以设为管理员的老师、用管理员密码登录着的设备"""
+        name_of = lambda uid: users["users"].get(uid, {}).get("name", "（已删除）")
+        cls_of = lambda uid: [c for c, a in users["acl"].items() if uid in a.get("heads", []) + a.get("teachers", [])]
+        teachers = [{"uid": uid, "name": u["name"], "classes": cls_of(uid), "admin": uid in users["admins"],
+                     "created": datetime.fromtimestamp(u.get("created", 0), CN).strftime("%m-%d")}
+                    for uid, u in users["users"].items() if cls_of(uid) or uid in users["admins"]]
+        me = (self.headers.get("Authorization") or "").replace("Bearer ", "")
+        now = time.time()
+        devices = sorted(({"name": v["name"], "me": k == me,
+                           "time": datetime.fromtimestamp(v["exp"] - 30 * 86400, CN).strftime("%m-%d %H:%M")}
+                          for k, v in sessions.items() if v.get("uid") == "admin" and v["exp"] > now), key=lambda d: d["time"])
+        return {"teachers": sorted(teachers, key=lambda t: (not t["admin"], t["name"])), "devices": devices,
+                "changed": bool(settings.get("admin_pw"))}
+
+    def api_admin_password(self, body, sender):
+        """主管理员改管理员密码：改完其他用密码登录的设备全部下线（自己这台不受影响）"""
+        old, new = str(body.get("old") or ""), str(body.get("new") or "")
+        if not check_password(old):
+            return self.send_json({"error": "原密码不对"}, 403)
+        if len(new) < 8 or new.isdigit() or new.isalpha():
+            return self.send_json({"error": "新密码至少 8 位，要同时有字母和数字"}, 400)
+        if new == old:
+            return self.send_json({"error": "新密码和原密码一样"}, 400)
+        me = (self.headers.get("Authorization") or "").replace("Bearer ", "")
+        with lock:
+            salt = secrets.token_hex(16)
+            settings["admin_pw"] = {"salt": salt, "hash": hash_pw(new, salt), "at": time.time()}
+            write_json(SETTINGS_PATH, settings)
+            kicked = [k for k, v in sessions.items() if v.get("uid") == "admin" and k != me]
+            for k in kicked:
+                sessions.pop(k)
+            write_json(SESSION_PATH, sessions)
+        self.send_json({"ok": True, "kicked": len(kicked), **self.admin_info()})
+
+    def api_admins_set(self, body, sender):
+        uid, on = str(body.get("uid") or ""), bool(body.get("on"))
+        if uid not in users["users"]:
+            return self.send_json({"error": "没有这位老师"}, 404)
+        with lock:
+            users["admins"] = [x for x in users["admins"] if x != uid] + ([uid] if on else [])
+            save_users()
+        self.send_json({"ok": True, **self.admin_info()})
+
+    def api_member_role(self, body, sender):
+        """把本班的一位老师改成班主任（head）或任课老师（teacher）；账号和登录码不变，对方刷新工作台就生效"""
+        cls, uid, role = str(body.get("class") or ""), str(body.get("uid") or ""), body.get("role")
+        if role not in ("head", "teacher"):
+            return self.send_json({"error": "参数不对"}, 400)
+        with lock:
+            acl = users["acl"].get(cls)
+            if not acl or uid not in acl.get("heads", []) + acl.get("teachers", []):
+                return self.send_json({"error": "这位老师不在这个班"}, 404)
+            for k in ("heads", "teachers"):
+                acl[k] = [x for x in acl.get(k, []) if x != uid]
+            acl.setdefault(role + "s", []).append(uid)
+            save_users()
+        self.send_json({"ok": True})
+
     def api_member_remove(self, body, sender):
         cls, uid = str(body.get("class") or ""), str(body.get("uid") or "")
         with lock:
@@ -1701,9 +2294,86 @@ class Handler(BaseHTTPRequestHandler):
         if PUBLIC and len(text) > TEXT_LIMIT:
             return self.send_json({"error": f"消息最长 {TEXT_LIMIT} 字"}, 400)
         text = text[:300]
+        send_at = None
+        if body.get("at"):  # 定时发送：只能定今天，"HH:MM"
+            try:
+                send_at = datetime.combine(now_cn().date(), datetime.strptime(str(body["at"]), "%H:%M").time(), CN).timestamp()
+            except ValueError:
+                return self.send_json({"error": "定时的时间不对"}, 400)
+            if send_at <= time.time() + 30:
+                return self.send_json({"error": "这个时间已经过了，请选今天稍后的时间"}, 400)
         ids, scheduled = create_messages(classes, text, sender, body.get("voice"), body.get("urgent"),
-                                         body.get("defer"), body.get("voice_name"), who=str(body.get("who") or "")[:40] or None)
-        self.send_json({"ok": True, "ids": ids, "scheduled": scheduled})
+                                         body.get("defer"), body.get("voice_name"), who=str(body.get("who") or "")[:40] or None,
+                                         loud=body.get("loud"), send_at=send_at)
+        self.send_json({"ok": True, "ids": ids, "scheduled": scheduled,
+                        "exam": not body.get("urgent") and any(exam_now(c, send_at) for c in classes)})
+
+    # ---------- 考试 ----------
+    def api_exam_save(self, body, sender):
+        name = re.sub(r"\s+", " ", str(body.get("name") or "")).strip()[:30]
+        classes = list(dict.fromkeys(str(c) for c in body.get("classes") or [] if str(c) in load_students()))
+        notice = "\n".join(l.strip()[:60] for l in str(body.get("notice") or "").split("\n") if l.strip())[:600]
+        sessions = []
+        for x in (body.get("sessions") or [])[:30]:
+            subj, date, a, b = (str(x.get(k) or "").strip() for k in ("subject", "date", "start", "end"))
+            if not subj and not a and not b:
+                continue
+            if not subj or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) or not re.fullmatch(r"\d{2}:\d{2}", a) or not re.fullmatch(r"\d{2}:\d{2}", b):
+                return self.send_json({"error": "每一场都要填科目、日期、开始和结束时间"}, 400)
+            if a >= b:
+                return self.send_json({"error": f"{subj}：结束时间要晚于开始时间"}, 400)
+            sessions.append({"subject": subj[:10], "date": date, "start": a, "end": b})
+        if not name:
+            return self.send_json({"error": "请填写考试名称，如：10 月月考"}, 400)
+        if not classes:
+            return self.send_json({"error": "请选择参加考试的班级"}, 400)
+        if not sessions:
+            return self.send_json({"error": "至少填一场考试"}, 400)
+        keyed = sorted((x["date"], x["start"], x["end"], x["subject"]) for x in sessions)
+        for p_, n_ in zip(keyed, keyed[1:]):
+            if p_[0] == n_[0] and n_[1] < p_[2]:
+                return self.send_json({"error": f"{p_[3]} 和 {n_[3]} 的时间重叠了"}, 400)
+        with lock:
+            old = next((e for e in exams if e["id"] == body.get("id")), None)
+            for e in exams:  # 同一个班不能同时有两场考试
+                if e is old:
+                    continue
+                for c in set(classes) & set(e["classes"]):
+                    for x in e["sessions"]:
+                        for y in sessions:
+                            if x["date"] == y["date"] and x["start"] < y["end"] and y["start"] < x["end"]:
+                                return self.send_json({"error": f"{c}在{e['name']}里已经有 {x['date'][5:]} {x['start']}–{x['end']} 的{x['subject']}，时间重叠了"}, 400)
+            if old:
+                changed = {i for i, x in enumerate(old["sessions"]) if i >= len(sessions) or x != sessions[i]}
+                old.update(name=name, classes=classes, sessions=sessions, notice=notice,
+                           ended={k: v for k, v in (old.get("ended") or {}).items() if int(k.split("|")[1]) not in changed})
+                item = old
+            else:
+                item = {"id": next_id(exams), "name": name, "classes": classes, "sessions": sessions, "notice": notice,
+                        "creator": sender, "uid": self.sess()["uid"], "created": time.time(), "ended": {}}
+                exams.append(item)
+            cutoff = (now_cn() - timedelta(days=60)).strftime("%Y-%m-%d")
+            exams[:] = [e for e in exams if max(x["date"] for x in e["sessions"]) >= cutoff]
+            save_exams()
+        self.send_json({"ok": True, "item": item})
+
+    def api_exam_delete(self, body, sender):
+        with lock:
+            exams[:] = [e for e in exams if e["id"] != body.get("id")]
+            save_exams()
+        self.send_json({"ok": True})
+
+    def api_exam_end(self, body, sender):
+        """提前结束这个班正在显示的这一场（大屏马上收起）"""
+        cls = str(body.get("class") or "")
+        with lock:
+            e = next((e for e in exams if e["id"] == body.get("id") and cls in e["classes"]), None)
+            i = body.get("idx")
+            if not e or not isinstance(i, int) or not 0 <= i < len(e["sessions"]):
+                return self.send_json({"error": "找不到这场考试"}, 404)
+            e.setdefault("ended", {})[f"{cls}|{i}"] = time.time()
+            save_exams()
+        self.send_json({"ok": True})
 
     # ---------- 作业 ----------
     def api_homework_add(self, body, sender):
@@ -1777,6 +2447,61 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"ok": True})
 
     # ---------- 常用语 ----------
+    def api_shot_request(self, body, sender):
+        """班主任/管理员点"看一眼大屏"：一体机下次轮询时截一张图传上来"""
+        cls = str(body.get("class") or "")
+        shot_req[cls] = time.time()
+        self.send_json({"ok": True, "req": shot_req[cls], "online": time.time() - last_seen.get(cls, 0) < 15})
+
+    def api_shot_upload(self, q):
+        cls = resolve_class((q.get("class") or [""])[0])
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if not self.classroom_ok(q, cls) or length > 4_000_000:
+            self.close_connection = True
+            return self.send_json({"error": "密钥错误或图片太大"}, 403)
+        data = self.rfile.read(length) if length else b""
+        ctype = "image/png" if data[:4] == b"\x89PNG" else "image/jpeg" if data[:2] == b"\xff\xd8" else ""
+        err = (q.get("err") or [""])[0][:200] or ("" if ctype else "截图失败")
+        shots[cls] = {"img": data if ctype else None, "type": ctype, "at": time.time(), "err": err}
+        self.send_json({"ok": True})
+
+    def api_me_name(self, body, sender):
+        """老师改自己的称呼：账号、登录着的设备、自己布置的作业/提醒/错题/留言跟着改（以前发过的消息不改）"""
+        s = self.sess()
+        name = re.sub(r"\s+", "", str(body.get("name") or ""))[:20]
+        if not name:
+            return self.send_json({"error": "请填写称呼"}, 400)
+        old, uid = s["name"], s["uid"]
+        mine = set(self.my_classes())
+        with lock:
+            if uid == "admin":  # 用管理员密码登录的：只改这台设备
+                s["name"] = name
+            else:
+                if uid in users["users"]:
+                    users["users"][uid]["name"] = name
+                    save_users()
+                for t in sessions.values():
+                    if t.get("uid") == uid:
+                        t["name"] = name
+            write_json(SESSION_PATH, sessions)
+            for items, key, path in ((homework, "teacher", HOMEWORK_PATH), (quizzes, "teacher", QUIZ_PATH), (reminders, "creator", REMINDER_PATH)):
+                for x in items:
+                    if x.get(key) == old and (set(x["classes"]) & mine if "classes" in x else x.get("class") in mine):
+                        x[key] = name
+                write_json(path, items)
+            for n in notes:
+                if n.get("uid") == uid:
+                    n["teacher"] = name
+            write_json(NOTES_PATH, notes)
+            mc = settings.get("my_classes", {})
+            if old in mc and name not in mc:
+                mc[name] = mc.pop(old)
+                write_json(SETTINGS_PATH, settings)
+        self.send_json({"ok": True, "name": name})
+
     def my_phrases(self):
         """公共模式：默认几条大家共用 + 自己加的；本校服务器全部共用"""
         if not PUBLIC:
@@ -1902,6 +2627,72 @@ class Handler(BaseHTTPRequestHandler):
             print("图片处理失败：", e)
             return self.send_json({"error": "无法读取这张图片，请换一张试试"}, 400)
         self.send_json({"ok": True, "img": f"/img/{name}.png", "w": w, "h": h})
+
+    def api_file_upload(self, q):
+        """老师把文档发到大屏：?class=班级&name=文件名，请求体是文件本身（边收边写盘，不占内存）"""
+        def fail(msg, code=400):
+            self.close_connection = True  # 请求体可能没读完，这条连接不能再用
+            return self.send_json({"error": msg}, code)
+        s = self.sess()
+        if not s:
+            return fail("请先登录", 401)
+        cls = (q.get("class") or [""])[0]
+        if not self.allowed(cls, "teacher"):
+            return fail("你不是这个班的老师", 403)
+        name = os.path.basename((q.get("name") or [""])[0].replace("\\", "/")).strip()
+        name = re.sub(r'[\x00-\x1f<>:"|?*]', "_", name)[:80]
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        if ext not in FILE_EXTS:
+            return fail("只能发 Word、PDF、PPT、Excel、网页、图片、mp4 视频这类文件")
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length <= 0:
+            return fail("文件是空的")
+        if length > FILE_MAX:
+            return fail(f"文件太大了，最大 {FILE_MAX // 1024 // 1024}MB", 413)
+        with lock:
+            purge_files()
+            if sum(f["size"] for f in files) + length > FILE_TOTAL_MAX:
+                return fail("服务器空间不够了，请先删掉一些旧文件", 507)
+            if PUBLIC and sum(f["size"] for f in files if f["class"] == cls) + length > FILE_CLASS_MAX:
+                return fail(f"本班文件已经满 {FILE_CLASS_MAX // 1024 // 1024}MB 了，请先删掉一些旧文件（7 天后也会自动删）", 507)
+        fid = secrets.token_hex(12)
+        tmp = os.path.join(FILE_DIR, fid + ".part")
+        try:
+            left = length
+            with open(tmp, "wb") as fh:
+                while left > 0:
+                    chunk = self.rfile.read(min(left, 1024 * 1024))
+                    if not chunk:
+                        raise OSError("上传中断")
+                    fh.write(chunk)
+                    left -= len(chunk)
+            os.replace(tmp, os.path.join(FILE_DIR, fid))
+        except OSError:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return fail("上传中断了，请重试")
+        with lock:
+            files.append({"id": fid, "class": cls, "name": name, "ext": ext, "size": length,
+                          "by": s["name"], "uid": s["uid"], "at": time.time()})
+            write_json(FILE_PATH, files)
+        size = f"{length / 1024 / 1024:.1f}MB" if length >= 1024 * 1024 else f"{max(1, length // 1024)}KB"
+        ids, _ = create_messages([cls], f"发来文件：{name}", s["name"], kind="file",
+                                 data={"file": fid, "name": name, "size": size})
+        self.send_json({"ok": True, "id": fid, "msg_id": ids[0]})
+
+    def api_file_delete(self, body, sender):
+        fid = str(body.get("id") or "")
+        with lock:
+            for f in files:
+                if f["id"] == fid:
+                    f["at"] = 0  # 标成过期，交给 purge_files 删掉
+            purge_files()
+        self.send_json({"ok": True})
 
     def api_image_push(self, body, sender):
         cls = str(body.get("class") or "")
@@ -2030,6 +2821,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "班级名称不能以 _ 开头"}, 400)
             if old and old != cls and cls in load_students():
                 return self.send_json({"error": "已经有这个班级名了"}, 400)
+            if old and old != cls and old not in load_students():
+                return self.send_json({"error": "没有这个班级"}, 400)
             new = cls not in load_students() and not old
             if old and old != cls:  # 改班级名：旧名字标记删除
                 roster.pop(old, None)
@@ -2039,23 +2832,10 @@ class Handler(BaseHTTPRequestHandler):
             write_json(ROSTER_PATH, roster)
             if new:  # 新班：生成本班的教室密钥
                 users["class_keys"][cls] = secrets.token_urlsafe(12)
+                users["aliases"].pop(cls, None)
                 save_users()
-            if old and old != cls:  # 改了班级名：成员、邀请码、密钥、设置跟着改
-                if old in users["acl"]:
-                    users["acl"][cls] = users["acl"].pop(old)
-                if old in users["class_keys"]:
-                    users["class_keys"][cls] = users["class_keys"].pop(old)
-                for inv in users["invites"].values():
-                    if inv["class"] == old:
-                        inv["class"] = cls
-                save_users()
-                for key in ("notices", "duty", "cls_cfg", "timetable", "class_schedule"):
-                    if old in settings.get(key, {}):
-                        settings[key][cls] = settings[key].pop(old)
-                custom = settings.get("quotes", {}).get("custom", {})
-                if old in custom:
-                    custom[cls] = custom.pop(old)
-                write_json(SETTINGS_PATH, settings)
+            if old and old != cls:  # 改了班级名：所有东西跟着改；一体机还用旧名也能连上
+                rename_class(old, cls)
         self.send_json({"ok": True, "class": cls, "count": len(names)})
 
     def api_roster_delete(self, body, sender):
@@ -2197,6 +2977,15 @@ class Handler(BaseHTTPRequestHandler):
                                  "custom": [str(x).strip()[:80] for x in qd.get("custom") or [] if str(x).strip()][:100]}
             if "board_points" in body:
                 own["board_points"] = bool(body["board_points"])
+            if "tools_tab" in body:
+                own["tools_tab"] = bool(body["tools_tab"])
+            if isinstance(body.get("eve_plan"), list):  # 晚自习时间安排：每天都用这一份
+                plan = []
+                for it in body["eve_plan"]:
+                    a, e, t = (str(it.get(k, "")).strip() for k in ("start", "end", "text")) if isinstance(it, dict) else ("", "", "")
+                    if re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", a) and re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", e) and a < e and t:
+                        plan.append({"start": a, "end": e, "text": t[:12]})
+                own["eve_plan"] = sorted(plan, key=lambda x: x["start"])[:6]
             if isinstance(body.get("prep"), dict):
                 pp = body["prep"]
                 own["prep"] = {"enabled": bool(pp.get("enabled", True)), "voice": bool(pp.get("voice")),
@@ -2249,9 +3038,14 @@ class Handler(BaseHTTPRequestHandler):
         out, changed = [], False
         rv = (q.get("rv") or ["0"])[0]
         rv = int(rv) if rv.isdigit() else 0  # 接收端版本：3 起认得远程卸载
+        in_exam = exam_now(cls, now)
         with lock:
             for m in messages:
                 if m["class"] != cls or msg_status(m, now) not in ("pending", "delivered"):
+                    continue
+                if in_exam and not m["urgent"] and m.get("kind") not in ("uninstall", "standby"):
+                    continue  # 考试期间先不显示（考完还没过期的会再弹出来）
+                if m.get("kind") == "file" and rv < 4:  # 旧版接收端不会下载文件：等它 10 分钟内自动更新后再发
                     continue
                 if m.get("kind") == "uninstall":
                     if rv < 3:  # 旧版接收端不认识卸载指令（会当成普通消息弹出来）：等它 10 分钟内自动更新后再发
@@ -2261,15 +3055,18 @@ class Handler(BaseHTTPRequestHandler):
                     m["delivered_at"] = now
                     changed = True
                 popup = m["urgent"] or not st["in_class"]
+                say = m["voice"] and (popup or m.get("loud"))  # loud：老师上课时在工作台特意打开了"播报"，角落小提示也读出来
                 out.append({"id": m["id"], "text": m["text"], "sender": m["sender"],
                             "kind": m.get("kind", "call"), "data": m.get("data"),
                             "time": datetime.fromtimestamp(m["created"], CN).strftime("%H:%M"),
-                            "popup": popup, "voice": m["voice"] and popup,
+                            "popup": popup, "voice": bool(say),
                             "audio": "/audio/" + m["audio"] if m.get("audio") else None,
-                            "speak": m.get("speak") if m["voice"] and popup else None})  # 没有自然人声时，Windows 接收端用本机语音读这段
+                            "speak": m.get("speak") if say else None})  # 没有自然人声时，Windows 接收端用本机语音读这段
             if changed:
                 save_messages()
-        self.send_json({"messages": out, "in_class": st["in_class"], "server_time": now})
+        req = shot_req.get(cls, 0)
+        shot = now - req < 20 and req > (shots.get(cls) or {}).get("at", 0)  # 有老师要看大屏，还没传上来
+        self.send_json({"messages": out, "in_class": st["in_class"], "server_time": now, "exam_rev": exam_rev[0], "shot": shot})
 
     def api_board(self, q):
         """一体机待机页的数据"""
@@ -2298,12 +3095,13 @@ class Handler(BaseHTTPRequestHandler):
                         "notice": settings.get("notices", {}).get(cls, ""), "server_time": time.time(),
                         "notes": [{"by": note_by(n), "text": n["text"]} for n in notes_of(cls)],  # 各科老师的大屏留言
                         "standby": {**{"mode": "evening"}, **(cc["standby"] or {})}, "screen_font": cc["screen_font"] if q.get("fv") else "system",  # 旧版接收端认不出中文字体名会反复重启，只给新版发字体
-                        "standby_window": window, "evening": in_eve, "session": session,
+                        "standby_window": window, "evening": in_eve, "session": session, "eve_plan": cc["eve_plan"], "tools_tab": cc["tools_tab"],
                         "classes_today": [c for c in today_classes(cls, dt)[0] if not c["evening"]],  # 白天看板只显示白天的课，晚自习的课在夜空看板上
                         "class_now": today_classes(cls, dt)[1], "class_next": today_classes(cls, dt)[2],
                         "duty": duty_today(cls, dt), "quote": pick_quote(cls),
                         "morning": {"start": morning_window(cls)[0], "end": morning_window(cls)[1], "date": dt.strftime("%Y-%m-%d"),
                                     "items": [{"subject": m["subject"], "content": m["content"]} for m in morning_of(cls)]},
+                        "exams": [{**x, "voice": exam_voice()} for x in exam_sessions(cls) if x["hide_at"] > time.time()],
                         "stars": sorted(([n, v] for n, v in point_totals(cls, week_start_ts(dt)).items() if v > 0),
                                         key=lambda x: -x[1])[:5] if cc["board_points"] else []})
 
@@ -2329,7 +3127,9 @@ class Handler(BaseHTTPRequestHandler):
         online = {c: now - last_seen.get(c, 0) < 15 for c in mine}
         st = period_status(cls=((q or {}).get("class") or [""])[0] or None)
         self.send_json({"messages": recent, "online": online, "period": st,
-                        "now": now_cn().strftime("%H:%M")})
+                        "now": now_cn().strftime("%H:%M"),
+                        "exam": (lambda x: {"subject": x["subject"], "start": x["start"], "end": x["end"], "id": x["exam_id"], "idx": x["idx"]} if x else None)(
+                            exam_now(((q or {}).get("class") or [""])[0]))})
 
 
 def re_hm(v):
@@ -2341,37 +3141,73 @@ def re_hm(v):
 
 
 def lan_ips():
-    ips = set()
+    """这台电脑在局域网里的地址（第一个是默认网卡的；学校没有外网也能找到）"""
+    ips = []
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ips.add(s.getsockname()[0])
+        s.connect(("10.255.255.255", 1))  # UDP 不会真的发包，只是让系统选出默认网卡
+        ips.append(s.getsockname()[0])
         s.close()
     except OSError:
         pass
-    return sorted(ips) or ["127.0.0.1"]
+    try:
+        for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+            if ip not in ips:
+                ips.append(ip)
+    except OSError:
+        pass
+    ips = [ip for ip in ips if not ip.startswith(("127.", "169.254.", "0."))]
+
+    def private(ip):  # 学校内网地址排前面（代理软件的虚拟网卡如 198.18.x.x 排后面）
+        a = [int(x) for x in ip.split(".")]
+        return a[0] == 10 or (a[0] == 192 and a[1] == 168) or (a[0] == 172 and 16 <= a[1] <= 31)
+    ips.sort(key=lambda ip: not private(ip))
+    return ips or ["127.0.0.1"]
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT") or CFG["port"])
-    httpd = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    migrate_notices()
+    try:
+        httpd = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    except OSError as e:
+        print(f"\n× 端口 {port} 被占用，启动失败（{e}）")
+        print("  可能是班级助手已经开着了（看看任务栏里有没有它的窗口），")
+        print(f"  或者别的程序占了这个端口：用记事本打开 config.json，把 \"port\": {port} 改成别的数字（如 8090）再启动。")
+        raise SystemExit(3)  # 3：启动脚本看到它就不自动重启
     threading.Thread(target=reminder_loop, daemon=True).start()
     threading.Thread(target=backup_loop, daemon=True).start()
+    if os.name == "nt":  # 局域网版跑在学校 Windows 电脑上
+        import ctypes
+        try:
+            k32 = ctypes.windll.kernel32
+            k32.SetThreadExecutionState(0x80000000 | 0x00000001)  # 开着班级助手时电脑不自动睡眠（屏幕照样可以关）
+            h, mode = k32.GetStdHandle(-10), ctypes.c_uint32()
+            if k32.GetConsoleMode(h, ctypes.byref(mode)):  # 关掉"快速编辑"：误点黑窗口会让程序卡住
+                k32.SetConsoleMode(h, (mode.value & ~0x0040) | 0x0080)
+        except Exception:
+            pass
+    suffix = "" if port == 80 else f":{port}"
     print("=" * 56)
-    print(" 班级助手 已启动")
+    print(" 班级助手 已启动（这个窗口不要关，关了就停了）")
     print("=" * 56)
-    try:
-        import edge_tts  # noqa: F401
-        print(f" 语音：自然人声（{CFG['tts_voice']}）")
-    except ImportError:
-        print(" 语音：电脑自带语音（想要自然人声请先运行：python3 -m pip install --user edge-tts）")
-    print(f" 老师发送页面：   http://localhost:{port}/")
-    for ip in lan_ips():
-        print(f"   （同一网络内）  http://{ip}:{port}/")
-    print(f" 老师登录密码：   {CFG['teacher_password']}")
-    print(f" 教室密钥：       {CFG['classroom_key']}")
-    print(f" 浏览器测试接收端：http://localhost:{port}/classroom?class=高二3班&key={CFG['classroom_key']}")
-    print(" （密码和密钥可在 config.json 里修改，改完重启生效）")
+    if TC:
+        print(f" 语音：腾讯云语音合成（每天最多 {int(TC.get('daily_chars') or 20000)} 字）")
+    elif EDGE:
+        print(f" 语音：自然人声（{CFG['tts_voice']}，需要联网）")
+    elif LOCAL_VOICES:
+        print(f" 语音：{LOCAL_VOICES[0]['name']}，不用联网")
+    else:
+        print(" 语音：这台电脑没有中文语音，大屏只响提示音（Windows 一体机会用自己的语音朗读）")
+    ips = lan_ips()
+    print(" 工作台地址（老师手机连学校 Wi-Fi 后打开）：")
+    for ip in ips:
+        print(f"     http://{ip}{suffix}/")
+    if ips == ["127.0.0.1"]:
+        print("     （没找到局域网地址：请检查这台电脑有没有连上网线或 Wi-Fi）")
+    print(" 管理员密码：     已在工作台修改（config.json 里的不再有效）" if settings.get("admin_pw") else f" 管理员密码：     {CFG['teacher_password']}")
+    print(" 提示：这台电脑要一直开着；最好请网管把它的 IP 地址固定下来，")
+    print("       不然地址变了，一体机和老师手机就连不上了。")
     print(" 按 Ctrl+C 停止")
     print("=" * 56)
     try:

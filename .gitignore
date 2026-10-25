@@ -9,3 +9,6 @@ venv/
 *.bak*
 .DS_Store
 __pycache__/
+lan/.cache/
+lan/out/
+tts.json*

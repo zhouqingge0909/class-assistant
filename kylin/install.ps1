@@ -48,8 +48,10 @@ try {
     $file = "python-$ver$(if ($x64) { '-amd64' }).exe"
     $exe = Join-Path $env:TEMP $file
     $ok = $false
-    foreach ($m in "https://registry.npmmirror.com/-/binary/python/$ver/$file", "https://mirrors.huaweicloud.com/python/$ver/$file", "https://www.python.org/ftp/python/$ver/$file") {
-      try { Say "   下载 $m"; $wc.DownloadFile($m, $exe); if ((Get-Item $exe).Length -gt 10MB) { $ok = $true; break } } catch { Say "   这个地址下载失败，换一个" DarkYellow }
+    $file38 = "python-3.8.10$(if ($x64) { '-amd64' }).exe"
+    foreach ($m in "$Server/dist/python/$file", "$Server/dist/python/$file38", "https://registry.npmmirror.com/-/binary/python/$ver/$file", "https://mirrors.huaweicloud.com/python/$ver/$file", "https://www.python.org/ftp/python/$ver/$file") {
+      $local = $m.StartsWith($Server)  # 先试局域网版服务器自带的安装包，没有就不提示
+      try { if (-not $local) { Say "   下载 $m" }; $wc.DownloadFile($m, $exe); if ((Get-Item $exe).Length -gt 10MB) { $ok = $true; break } } catch { if (-not $local) { Say "   这个地址下载失败，换一个" DarkYellow } }
     }
     if (-not $ok) { Say '× Python 下载失败，请检查一体机能否上网' Red; Finish }
     Say "   正在安装 Python $ver（不会弹窗，请稍等）"

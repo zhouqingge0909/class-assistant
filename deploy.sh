@@ -21,8 +21,8 @@ HOST="$LOGIN@$IP"
 echo "== 已连接 $HOST"
 
 echo "== 1/3 上传程序和配置"
-COPYFILE_DISABLE=1 tar -C "$DIR" --exclude ./data --exclude ./windows --exclude ./声音试听 \
-  --exclude ./deploy.sh --exclude ./fonts --exclude ./backups --exclude ./pull_backups.sh --exclude './*.md' --exclude '.DS_Store' -czf - . |
+COPYFILE_DISABLE=1 tar -C "$DIR" --exclude ./data --exclude ./lan --exclude ./windows --exclude ./声音试听 \
+  --exclude ./deploy.sh --exclude './tts.json*' --exclude ./fonts --exclude ./backups --exclude ./pull_backups.sh --exclude '*.md' --exclude '.claude' --exclude '.DS_Store' -czf - . |
   "${SSH[@]}" "$HOST" 'sudo mkdir -p /opt/class-call && sudo tar --warning=no-unknown-keyword -C /opt/class-call -xzf -'
 
 echo "== 2/3 安装运行环境（第一次需要一两分钟）"
@@ -52,6 +52,7 @@ Environment=PORT=80 PYTHONUNBUFFERED=1
 User=classcall
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 Restart=always
+LimitNOFILE=65536
 RestartSec=3
 
 [Install]

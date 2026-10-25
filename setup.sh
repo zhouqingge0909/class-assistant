@@ -56,6 +56,7 @@ Environment=PORT=80 PYTHONUNBUFFERED=1
 User=classcall
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 Restart=always
+LimitNOFILE=65536
 RestartSec=3
 
 [Install]

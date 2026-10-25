@@ -376,6 +376,7 @@
   <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></symbol>
   <symbol id="i-study" viewBox="0 0 24 24"><path d="M3 20h18"/><rect x="5" y="11" width="3" height="7" rx="1"/><rect x="10.5" y="6" width="3" height="12" rx="1"/><rect x="16" y="13" width="3" height="5" rx="1"/></symbol>
   <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></symbol>
   <symbol id="i-broom" viewBox="0 0 24 24"><path d="M14 4 20 10"/><path d="m17 7-6.5 6.5"/><path d="M10.5 13.5 4 20h7l3-3-3.5-3.5z"/></symbol>
 </svg>
 
@@ -386,6 +387,7 @@
     <div class="inner">
       <h1>班级助手</h1>
       <p>老师请<b>扫描班主任发给你的二维码</b>加入，扫过的手机会自动登录。<br>下面是管理员登录。</p>
+      <p id="lgStandalone" class="hidden" style="color:#b7791f">从桌面图标打开却要登录？请在微信里打开工作台，点右上角小人图标 →「添加到手机桌面」，重新添加一次。</p>
       <div class="field"><label>您的称呼</label><input class="input" id="lgName" placeholder="如：周老师" maxlength="20"></div>
       <div class="field"><label>管理员密码</label><input class="input" id="lgPwd" type="password" placeholder="请输入管理员密码"></div>
       <div class="err" id="lgErr"></div>
@@ -427,9 +429,16 @@
             <button class="btn primary" id="qSend" disabled><svg class="i sm"><use href="#i-send"/></svg><span>发送</span></button>
           </div>
           <div class="row" style="margin-top:12px;flex-wrap:wrap;gap:8px 16px">
-            <label class="switch"><input type="checkbox" id="optUrgent"><span class="track"></span>紧急（上课也弹大窗、播报）</label>
-            <label class="switch"><input type="checkbox" id="optMute"><span class="track"></span>不出声（只显示文字）</label>
+            <label class="switch"><input type="checkbox" id="optSpeak" checked><span class="track"></span>播报（读出来）</label>
+            <label class="switch"><input type="checkbox" id="optUrgent"><span class="track"></span>紧急（上课也弹大窗）</label>
+            <span class="row" style="gap:8px"><label class="switch"><input type="checkbox" id="optAt"><span class="track"></span>定时发送</label>
+              <input class="input hidden" id="optAtTime" type="time" style="width:auto;padding:5px 10px;font-size:16px"></span>
           </div>
+          <div class="hidden" id="atRepeat" style="margin-top:10px">
+            <div class="label" style="margin-bottom:6px"><svg class="i sm"><use href="#i-repeat"/></svg>重复（都不选就只发这一次） <button class="btn ghost sm" id="remWork">工作日</button><button class="btn ghost sm" id="remAll">每天</button></div>
+            <div class="days" id="remDays"></div>
+          </div>
+          <div class="hidden" id="qTip" style="margin-top:12px;background:#fff6e5;color:#8a5a00;border-radius:12px;padding:10px 14px;font-size:14.5px;line-height:1.65"></div>
           <div class="qres" id="qRes"><span class="k">例子：小明加2分作业优秀 · 抽一个人回答 · 每天17:10提醒值日生打扫教室</span></div>
           <div class="chips" id="qPhrases" style="margin-top:12px"></div>
         </div>
@@ -438,8 +447,12 @@
               <div class="ctitle" style="margin-bottom:4px"><div class="ib"><svg class="i"><use href="#i-log"/></svg></div><h2>最近发送</h2><button class="btn ghost sm right" data-go="log">全部 ›</button></div>
               <div class="list" id="recentMini"></div>
             </div>
+            <div class="card hidden" id="remCard" style="margin-bottom:20px">
+              <div class="ctitle" style="margin-bottom:4px"><div class="ib"><svg class="i"><use href="#i-repeat"/></svg></div><h2>定时提醒</h2><span class="me right">点一下修改，开关暂停</span></div>
+              <div class="list" id="remList"></div>
+            </div>
         <details class="more" id="moreBox">
-          <summary class="more-sum"><svg class="i sm"><use href="#i-plus"/></svg>更多选项：点名单叫学生 · 自定义消息 · 按考试成绩面批</summary>
+          <summary class="more-sum"><svg class="i sm"><use href="#i-plus"/></svg>更多选项：自定义消息 · 按考试成绩面批</summary>
           <div style="margin-top:16px">
         <details class="card" id="mpBox" style="margin-bottom:20px">
           <summary style="cursor:pointer;list-style:none"><div class="ctitle" style="margin:0"><div class="ib"><svg class="i"><use href="#i-homework"/></svg></div>
@@ -454,7 +467,12 @@
             <div class="sec"><div class="label">怎么算做错</div><div class="chips">
               <button class="chip" data-mprule="lost">丢分就算</button><button class="chip" data-mprule="half">得分率低于 60%</button><button class="chip" data-mprule="zero">得 0 分</button></div></div>
             <div class="sec"><div class="label">点要面批的题号（可多选，括号里是做错的人数）</div><div class="chips" id="mpQs"></div></div>
-            <div class="sec"><div class="label">什么时候（地点用下面"到哪里"选中的）</div><div class="chips" id="mpWhen"></div></div>
+            <div class="sec"><div class="label">什么时候</div><div class="chips" id="mpWhen"></div></div>
+            <div class="sec">
+              <div class="label"><svg class="i sm"><use href="#i-pin"/></svg>到哪里</div>
+              <div class="chips" id="places"></div>
+              <input class="input" id="placeCustom" placeholder="或自己填写地点" style="margin-top:10px">
+            </div>
             <div class="screen" style="margin-top:14px"><div class="body" id="mpText" style="font-size:17px;min-height:60px;padding:14px"></div></div>
             <button class="btn primary big" id="mpFill" style="margin-top:12px" disabled><svg class="i"><use href="#i-check"/></svg>填入消息，准备发送</button>
           </div>
@@ -463,31 +481,10 @@
           <div class="card">
             <div class="ctitle">
               <div class="ib"><svg class="i"><use href="#i-call"/></svg></div>
-              <div><h2>喊话</h2><div class="sub">把消息推送到教室大屏</div></div>
-              <div class="seg right" id="modeSeg">
-                <button data-mode="call" class="on"><svg class="i sm"><use href="#i-user"/></svg>叫学生</button>
-                <button data-mode="notice"><svg class="i sm"><use href="#i-msg"/></svg>发消息</button>
-              </div>
+              <div><h2>自定义消息</h2><div class="sub">写一段话推送到教室大屏</div></div>
             </div>
 
-            <div id="callBox">
-              <div class="sec">
-                <div class="label">选择学生</div>
-                <div class="search"><svg class="i sm"><use href="#i-search"/></svg><input class="input" id="search" placeholder="搜索姓名或序号"></div>
-                <div class="students" id="students" style="margin-top:12px"></div>
-              </div>
-              <div class="sec">
-                <div class="label"><svg class="i sm"><use href="#i-pin"/></svg>到哪里</div>
-                <div class="chips" id="places"></div>
-                <input class="input" id="placeCustom" placeholder="或自己填写地点" style="margin-top:10px">
-              </div>
-              <div class="sec">
-                <div class="label">补充一句（可不填）</div>
-                <input class="input" id="extra" placeholder="如：带上物理练习册" maxlength="40">
-              </div>
-            </div>
-
-            <div id="noticeBox" class="hidden">
+            <div id="noticeBox">
               <div class="sec">
                 <div class="label">常用语 · 点一下填入</div>
                 <div class="chips" id="phrases"></div>
@@ -501,8 +498,8 @@
 
             <div class="sec">
               <div class="label">发送方式</div>
-              <input type="checkbox" id="optVoice" checked hidden><input type="checkbox" id="optDefer" hidden>
-              <p class="me" style="white-space:normal;margin:0">上课时只在大屏角落安静显示，课间弹大窗并播报。需要上课也弹大窗，打开上面的"紧急"；午休等时候不想出声，打开"不出声"。</p>
+              <input type="checkbox" id="optDefer" hidden>
+              <p class="me" style="white-space:normal;margin:0">课间弹大窗，上课只在大屏右下角小字显示。「播报」管读不读出来（课间默认开、上课默认关）；「紧急」让上课也弹大窗。两个开关互不影响。</p>
 
             </div>
           </div>
@@ -575,14 +572,14 @@
         </div>
         <div class="grid2" style="margin-top:20px">
           <div class="card">
-            <div class="ctitle"><div class="ib" style="background:#fff8e6;color:#b46d00"><svg class="i"><use href="#i-msg"/></svg></div><div><h2>大屏留言</h2><div class="sub">一直挂在看板的"公告与留言"里，到期自动消失</div></div></div>
+            <div class="ctitle"><div class="ib" style="background:#fff8e6;color:#b46d00"><svg class="i"><use href="#i-msg"/></svg></div><div><h2>大屏留言</h2><div class="sub">一直挂在看板上，到期自动消失</div></div></div>
             <div class="sec"><div class="label">留言内容</div><textarea class="input" id="ntText" maxlength="120" placeholder="如：周五交实验报告，没交的找课代表登记"></textarea></div>
             <div class="sec"><div class="label">署名科目（可不选）</div><div class="chips" id="ntSubjects"></div></div>
             <div class="sec"><div class="label"><svg class="i sm"><use href="#i-cal"/></svg>显示到</div><div class="chips" id="ntKeep"></div></div>
             <button class="btn primary big" id="ntAdd" style="margin-top:16px"><svg class="i"><use href="#i-check"/></svg>发布到大屏</button>
           </div>
           <div class="card">
-            <div class="ctitle"><div class="ib" style="background:#fff8e6;color:#b46d00"><svg class="i"><use href="#i-board"/></svg></div><div><h2>大屏上的公告与留言</h2><div class="sub">自己的留言自己删，班主任能删全部</div></div></div>
+            <div class="ctitle"><div class="ib" style="background:#fff8e6;color:#b46d00"><svg class="i"><use href="#i-board"/></svg></div><div><h2>大屏上的留言</h2><div class="sub">自己的留言自己删，班主任能删全部</div></div></div>
             <div id="ntList"></div>
           </div>
         </div>
@@ -646,31 +643,6 @@
       </section>
 
       <!-- ---------- 提醒 ---------- -->
-      <section class="view" data-view="remind">
-        <div class="grid2">
-          <div class="card">
-            <div class="ctitle"><div class="ib"><svg class="i"><use href="#i-remind"/></svg></div><div><h2 id="remFormTitle">新建定时提醒</h2><div class="sub">到点自动推送到大屏，每天/每周重复</div></div></div>
-            <div class="sec"><div class="label">时间</div><input class="input" id="remTime" type="time" value="17:10" style="max-width:190px;font-size:22px;font-weight:800"></div>
-            <div class="sec">
-              <div class="label"><svg class="i sm"><use href="#i-repeat"/></svg>重复 <button class="btn ghost sm" id="remWork">工作日</button><button class="btn ghost sm" id="remAll">每天</button></div>
-              <div class="days" id="remDays"></div>
-            </div>
-            <div class="sec"><div class="label">提醒内容 <button class="btn ghost sm" id="remInsDuty">插入 {值日}</button></div><input class="input" id="remText" maxlength="200" placeholder="如：请今日值日生打扫教室：{值日}"></div>
-            <div class="sec opts">
-              <input type="checkbox" id="remVoice" checked hidden>
-              <label class="switch"><input type="checkbox" id="remUrgent"><span class="track"></span>紧急（上课也弹大窗）</label>
-            </div>
-            <div class="row" style="margin-top:20px">
-              <button class="btn primary big grow" id="remSave"><svg class="i"><use href="#i-save"/></svg><span>保存提醒</span></button>
-              <button class="btn hidden" id="remCancel" style="padding:15px 18px">取消</button>
-            </div>
-          </div>
-          <div class="card">
-            <div class="ctitle"><div class="ib"><svg class="i"><use href="#i-repeat"/></svg></div><div><h2>已设置的提醒</h2><div class="sub">点击可编辑，开关可暂停</div></div></div>
-            <div class="list" id="remList"></div>
-          </div>
-        </div>
-      </section>
 
       <!-- ---------- 课堂 ---------- -->
       <section class="view" data-view="tools">
@@ -699,30 +671,45 @@
             <div class="sec"><div class="label">本节已抽</div><div class="chips" id="pickHist"></div></div>
           </div>
         </div>
-          <div class="card" style="margin-top:20px">
-            <div class="ctitle"><div class="ib"><svg class="i"><use href="#i-image"/></svg></div><div><h2>错题投屏</h2><div class="sub">拍照或选一张题目截图，投到教室大屏</div></div></div>
-            <label class="drop" id="drop"><div id="dropInner"><svg class="i lg" style="width:36px;height:36px"><use href="#i-image"/></svg><div style="margin-top:6px">点这里拍照 / 选图片</div></div>
-              <input type="file" accept="image/*" id="imgFile"></label>
-            <div class="sec"><div class="label">说明（可不填）</div><input class="input" id="imgCaption" maxlength="60" placeholder="如：周练三 第 7 题"></div>
-            <div class="sec"><div class="label">限时订正</div><div class="chips" id="imgTimer"></div></div>
-            <button class="btn primary big" id="imgPush" style="margin-top:16px" disabled><svg class="i"><use href="#i-board"/></svg>投到大屏</button>
-            <div class="sec"><div class="label">最近投过的题</div><div class="thumbs" id="imgRecent"></div></div>
+          <div class="card" id="fileCard" style="margin-top:20px">
+            <div class="ctitle"><div class="ib"><svg class="i"><use href="#i-file"/></svg></div><div><h2>发文件到大屏</h2><div class="sub">Word、PDF、PPT、Excel、网页、图片、视频，大屏上点"打开"就能放</div></div></div>
+            <label class="drop" id="fileDrop"><div id="fileInner"><svg class="i lg" style="width:36px;height:36px"><use href="#i-file"/></svg><div style="margin-top:6px">点这里选文件</div><div class="me" style="justify-content:center">电脑上也可以把文件拖到这里</div></div>
+              <input type="file" id="fileInput"></label>
+            <div id="fileProg" class="hidden" style="margin-top:12px"><div style="height:10px;border-radius:99px;background:var(--soft);overflow:hidden"><div id="fileBar" style="height:100%;width:0;background:var(--acc,#16a571);transition:width .2s"></div></div><div class="me" id="fileProgTxt" style="margin-top:6px"></div></div>
+            <div class="me" style="white-space:normal;margin-top:10px;line-height:1.7">最大 50MB，保留 7 天。一体机下载好后存在桌面「班级文件」里。网页要是单个 .html 文件，用浏览器打开。<br>📱 苹果手机发微信里的文件：先在微信里打开文件 → ··· →「用其他应用打开」→「存储到文件」，再回来选。</div>
+            <div class="sec"><div class="label">最近发的文件</div><div class="list" id="fileList"></div></div>
           </div>
       </section>
 
       <!-- ---------- 大屏 ---------- -->
       <section class="view" data-view="board">
+        <div class="card" id="examCard" style="margin-bottom:20px">
+          <div class="ctitle"><div class="ib" style="background:#e3edf8;color:#1d4f80"><svg class="i"><use href="#i-cal"/></svg></div><div><h2>考试大屏</h2>
+            <div class="sub" style="white-space:normal">开考前 15 分钟整屏显示须知，考试中显示科目和倒计时；开考、剩 15 分钟、结束各播报一次。考试期间普通消息考完再显示，紧急消息照常</div></div></div>
+          <div id="examList"></div>
+          <button class="btn soft" id="examNew" style="margin-top:10px"><svg class="i sm"><use href="#i-plus"/></svg>新建考试</button>
+          <div id="examForm" class="hidden" style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)">
+            <div class="sec"><div class="label">考试名称</div><input class="input" id="examName" maxlength="30" placeholder="如：高三 10 月月考"></div>
+            <div class="sec"><div class="label">各场考试（科目、日期、开始、结束）</div><div id="examRows"></div>
+              <button class="btn ghost sm" id="examAddRow"><svg class="i sm"><use href="#i-plus"/></svg>再加一场</button>
+              <datalist id="examSubjects"></datalist></div>
+            <div class="sec" id="examClsBox"><div class="label">哪些班的大屏显示</div><div class="chips" id="examClasses"></div></div>
+            <div class="sec"><div class="label">考场须知（一行一条，开考前整屏显示）</div><textarea class="input" id="examNotice" style="min-height:120px"></textarea></div>
+            <div class="row" style="gap:8px;margin-top:14px"><button class="btn primary" id="examSave"><svg class="i sm"><use href="#i-check"/></svg>保存</button><button class="btn ghost" id="examCancel">取消</button></div>
+          </div>
+        </div>
         <div class="grid2">
           <div class="card">
-            <button class="btn primary big" data-boardshow="1" style="margin-bottom:18px"><svg class="i"><use href="#i-board"/></svg>现在在大屏显示看板</button>
+            <button class="btn primary big" data-boardshow="1" style="margin-bottom:10px"><svg class="i"><use href="#i-board"/></svg>现在在大屏显示看板</button>
+            <button class="btn soft big" id="shotBtn" style="margin-bottom:18px"><svg class="i"><use href="#i-board"/></svg>看一眼大屏（现在显示什么）</button>
             <div class="ctitle"><div class="ib"><svg class="i"><use href="#i-board"/></svg></div><div><h2>看板设置</h2><div class="sub">默认只在晚自习无人使用时自动出现；平时可以手动调出，碰一下屏幕收起</div></div></div>
-            <div class="sec"><div class="label"><svg class="i sm"><use href="#i-note"/></svg>班级公告</div>
-              <textarea class="input" id="bdNotice" maxlength="300" placeholder="如：本周值日：第 3 组　周五交家长签字单"></textarea>
-              <div class="row" style="margin-top:8px"><span class="me" style="white-space:normal">公告显示在看板右下角；清空再保存就是撤掉公告</span><span style="flex:1"></span>
-                <button class="btn soft sm" id="ntSave"><svg class="i sm"><use href="#i-save"/></svg>保存公告</button></div></div>
             <div class="sec"><div class="label"><svg class="i sm"><use href="#i-cal"/></svg>倒计时（最多 4 个）</div>
               <div id="cdRows"></div>
               <button class="btn ghost sm" id="cdAdd"><svg class="i sm"><use href="#i-plus"/></svg>添加倒计时</button></div>
+            <div class="sec"><div class="label"><svg class="i sm"><use href="#i-clock"/></svg>晚自习时间安排（每天都用这一份）</div>
+              <textarea class="input" id="epText" style="min-height:120px;font-variant-numeric:tabular-nums" placeholder="一行一段，最多 6 行，例如：&#10;19:00-19:40 语文&#10;19:40-20:30 数学&#10;20:40-21:20 自主复习"></textarea>
+              <div class="row" style="margin-top:8px"><span class="me" style="white-space:normal">正在进行的一段会高亮并显示进度；清空再保存就不显示</span><span style="flex:1"></span>
+                <button class="btn soft sm" id="epSave"><svg class="i sm"><use href="#i-save"/></svg>保存时间安排</button></div></div>
             <div class="sec"><div class="label"><svg class="i sm"><use href="#i-star"/></svg>每日一句（待机页底部，每天换一句）</div>
               <label class="switch" style="display:flex"><input type="checkbox" id="qtOn" checked><span class="track"></span>显示每日一句</label>
               <label class="switch" style="margin-top:10px;display:flex"><input type="checkbox" id="qtBuiltin" checked><span class="track"></span><span id="qtBuiltinLabel">使用内置的励志名言和古诗词</span></label>
@@ -762,6 +749,7 @@
               <label class="switch" style="display:flex"><input type="checkbox" id="sbOn" checked><span class="track"></span>无人使用时自动显示看板</label>
               <div class="row" style="margin-top:12px;flex-wrap:wrap"><span class="me">什么时候自动出现</span>
                 <div class="chips"><button class="chip" data-sbmode="evening">只在晚自习</button><button class="chip" data-sbmode="breaks">只在白天课间</button><button class="chip" data-sbmode="both">晚自习和课间</button></div></div>
+              <label class="switch" style="margin-top:10px;display:flex"><input type="checkbox" id="sbTools" checked><span class="track"></span>屏幕右边显示「工具」小把手（在大屏上直接点计时、抽号）</label>
               <label class="switch" style="margin-top:10px"><input type="checkbox" id="sbStars" checked><span class="track"></span>待机页显示"本周之星"（积分前 5 名，不显示后几名）</label>
               <div class="row" style="margin-top:12px;flex-wrap:wrap"><span class="me">无人操作</span><div class="chips" id="sbIdle"></div><span class="me">分钟后显示</span></div>
               <div class="row" style="margin-top:12px"><span class="me">大屏字体</span>
@@ -795,6 +783,24 @@
             <button class="btn soft sm right" id="bkNow"><svg class="i sm"><use href="#i-save"/></svg>立即备份</button></div>
           <div class="list" id="bkList"></div>
         </div>
+        <div class="card hidden" id="admCard">
+          <div class="ctitle"><div class="ib"><svg class="i"><use href="#i-user"/></svg></div><div><h2>管理员</h2>
+            <div class="sub">管理员能看到、管理全部班级。别把管理员密码告诉其他老师——要让谁帮忙管理，在下面把他设为管理员</div></div></div>
+          <div class="sec"><div class="label">其他管理员</div>
+            <p class="me" style="display:block;white-space:normal;margin:0 0 6px">他们用自己的登录码登录，不用知道密码；不能改密码、不能设管理员、不能下载备份。</p>
+            <div class="list" id="admList"></div>
+            <div class="row" style="margin-top:8px;flex-wrap:wrap"><select class="input grow" id="admPick"></select>
+              <button class="btn primary sm" id="admAdd">设为管理员</button></div></div>
+          <div class="sec"><div class="label">正在用管理员密码登录的设备 <span class="me" id="admDevN"></span></div>
+            <div class="list" id="admDevices"></div>
+            <p class="me" style="display:block;white-space:normal;margin:8px 0 0">这里除了你自己，不应该有别人。有别人说明密码传出去了：改一下密码，这些设备会全部退出登录。</p></div>
+          <div class="sec"><div class="label">修改管理员密码</div>
+            <input class="input" id="pwOld" type="password" autocomplete="current-password" placeholder="原密码">
+            <input class="input" id="pwNew" type="password" autocomplete="new-password" placeholder="新密码：至少 8 位，字母和数字都要有" style="margin-top:8px">
+            <input class="input" id="pwNew2" type="password" autocomplete="new-password" placeholder="再输一遍新密码" style="margin-top:8px">
+            <div class="row" style="margin-top:8px"><button class="btn primary sm" id="pwSave"><svg class="i sm"><use href="#i-save"/></svg>修改密码</button></div>
+            <p class="me" style="display:block;white-space:normal;margin:8px 0 0">改完后，其他用密码登录的设备都会退出，你这台不受影响。扫码加入的老师不受影响。</p></div>
+        </div>
         <div class="card hidden" id="regCard">
           <div class="ctitle"><div class="ib"><svg class="i"><use href="#i-user"/></svg></div><div><h2>网友注册</h2>
             <div class="sub" id="regSub">网友打开注册链接、填注册码，就能自己建班</div></div></div>
@@ -805,6 +811,9 @@
             <div class="row"><input class="input grow" id="regCode" maxlength="20" placeholder="4–20 位字母或数字，如 banji2026">
               <button class="btn primary sm" id="regSave"><svg class="i sm"><use href="#i-save"/></svg>保存</button></div>
             <p class="me" style="display:block;white-space:normal;margin:8px 0 0">改了注册码后，记得同步改公众号的自动回复。已经注册的老师不受影响。</p></div>
+          <div class="sec"><div class="label">暂停注册 <span class="me" id="regPauseNow"></span></div>
+            <div class="row"><button class="btn soft sm" id="regPause"></button></div>
+            <p class="me" style="display:block;white-space:normal;margin:8px 0 0">服务器忙不过来时点这里：暂停后谁都注册不了、也建不了新班，注册页显示"暂未开放注册"；已经注册的老师照常使用。注册码不会变。</p></div>
         </div>
       </section>
     </main>
@@ -855,9 +864,19 @@
 
 <div class="rcpt hidden" id="track"><span class="ti" id="trackIcon"></span><div style="flex:1;min-width:0"><div class="tt" id="trackTitle"></div><div class="ts" id="trackSub"></div></div><span class="x" id="trackX">×</span></div>
 
+<div class="mask hidden" id="shotMask">
+  <div class="dialog" style="max-width:860px;width:calc(100% - 24px)">
+    <h3>大屏现在的画面</h3>
+    <img id="shotImg" style="width:100%;border-radius:10px;background:#0d1830;display:none">
+    <div class="me" id="shotTip" style="display:block;white-space:normal;margin-top:8px;text-align:center">正在请一体机截图…</div>
+    <div class="btns"><button class="btn" id="shotClose">关闭</button><button class="btn soft" id="shotAgain">刷新</button></div>
+  </div>
+</div>
+
 <div class="mask hidden" id="meMask">
   <div class="dialog" style="text-align:center">
     <h3 style="justify-content:center" id="meTitle">我的身份</h3>
+    <button class="btn ghost sm" id="meRename" style="margin:-6px auto 6px;display:flex">修改称呼</button>
     <div id="meBody"></div>
     <div class="btns"><button class="btn" id="meClose">关闭</button><button class="btn danger" id="meLogout">退出登录</button></div>
   </div>
@@ -880,17 +899,6 @@
   </div>
 </div>
 
-<div class="mask hidden" id="confirmMask">
-  <div class="dialog">
-    <h3><svg class="i"><use href="#i-send"/></svg>确认发送</h3>
-    <div class="me">发送到</div>
-    <div class="to" id="cfWho"></div>
-    <div class="screen" style="margin-top:14px"><div class="body" id="cfText" style="font-size:21px;min-height:70px;padding:18px 14px"></div></div>
-    <p class="me" id="cfMode" style="margin:12px 0 0;white-space:normal"></p>
-    <div class="btns"><button class="btn" id="cfCancel">取消</button><button class="btn primary" id="cfOk"><svg class="i sm"><use href="#i-send"/></svg>确认发送</button></div>
-  </div>
-</div>
-
 <script>
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -899,9 +907,9 @@ const ic = (n, cls = '') => `<svg class="i ${cls}"><use href="#i-${n}"/></svg>`;
 const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } },
                 set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
 
-const VIEWS = [['call', '喊话', '#16a571'], ['homework', '作业', '#16a571'], ['duty', '班务', '#16a571'], ['remind', '提醒', '#16a571'],
+const VIEWS = [['call', '喊话', '#16a571'], ['homework', '作业', '#16a571'], ['duty', '班务', '#16a571'],
                ['tools', '课堂', '#16a571'], ['board', '大屏', '#16a571'], ['log', '记录', '#16a571']];
-const STATUS = { acked: '已确认', delivered: '已送达', pending: '等待送达', scheduled: '下课发送', expired: '已过期', recalled: '已撤回' };
+const STATUS = { acked: '已确认', delivered: '已送达', pending: '等待送达', scheduled: '待发送', expired: '已过期', recalled: '已撤回' };
 const KIND = { call: ['call', '#3b9cf5'], homework: ['homework', '#1fb57a'], reminder: ['remind', '#f5a524'],
                timer: ['timer', '#f2706b'], pick: ['dice', '#f2706b'], praise: ['star', '#f97316'], image: ['image', '#6366f1'],
                collect: ['homework', '#1fb57a'], attend: ['cal', '#3b9cf5'], standby: ['board', '#16a571'], prep: ['homework', '#16a571'] };
@@ -999,9 +1007,9 @@ function renderSubjects() {
   $('#subjects').innerHTML = list.map(s => `<button class="chip" data-subj="${esc(s)}">${esc(s)}</button>`).join('');
   $$('[data-subj]').forEach(b => b.classList.toggle('on', b.dataset.subj === S.subject));
 }
-let S = { view: store.get('cc_view') || 'call', cls: store.get('cc_cls') || '', mode: 'call', student: null,
+let S = { view: store.get('cc_view') || 'call', cls: store.get('cc_cls') || '', mode: 'notice', student: null,
           place: null, subject: store.get('cc_subject') || '', minutes: 30, due: '明天交',
-          remDays: [1, 2, 3, 4, 5], remEdit: null, online: {}, recent: [], period: null, now: '', timer: null, picks: [],
+          remDays: [], remEdit: null, online: {}, recent: [], period: null, now: '', timer: null, picks: [],
           settings: null, hwTotal: null, remCount: null };
 
 // ---------- 基础 ----------
@@ -1036,12 +1044,13 @@ const cls = () => D.classes.find(c => c.name === S.cls);
 const curRole = () => D.admin ? 'admin' : (D.roles || {})[S.cls] || 'teacher';
 const TEACHER_VIEWS = ['call', 'homework', 'tools', 'log'];
 const canView = v => curRole() !== 'teacher' || TEACHER_VIEWS.includes(v);
-const voiceOpts = () => ({ voice_name: $('#voiceSel').value, ...($('#optMute') && $('#optMute').checked ? { voice: false } : {}) });
+const voiceOpts = () => ({ voice_name: $('#voiceSel').value, ...($('#optSpeak').checked ? {} : { voice: false }) });
 const hash = s => [...s].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
 
 function showLogin() {
   $('#appView').classList.add('hidden'); $('#loginView').classList.remove('hidden'); $('#lgName').value = me;
   $('#loginArt').innerHTML = ART.call;
+  $('#lgStandalone').classList.toggle('hidden', !(navigator.standalone || matchMedia('(display-mode: standalone)').matches));
 }
 async function login() {
   $('#lgErr').textContent = '';
@@ -1091,22 +1100,22 @@ function go(v) {
   $$('[data-view]').forEach(el => { if (el.tagName === 'SECTION') el.classList.toggle('on', el.dataset.view === v); });
   $$('nav [data-go]').forEach(el => el.classList.toggle('on', el.dataset.go === v));
   renderHero();
-  ({ log: () => { renderRecent(); loadBackups(); renderExport(); loadRegister(); }, duty: loadDuty, call: renderCall, homework: loadHomework, remind: loadReminders, tools: renderTools, board: loadBoard }[v] || (() => {}))();
+  ({ log: () => { renderRecent(); loadBackups(); renderExport(); loadRegister(); loadAdmins(); }, duty: loadDuty, call: renderCall, homework: loadHomework, tools: renderTools, board: loadBoard }[v] || (() => {}))();
   window.scrollTo({ top: 0 });
 }
 function greet() { const h = bjHour(); return h < 6 ? '夜深了' : h < 11 ? '早上好' : h < 13 ? '中午好' : h < 18 ? '下午好' : '晚上好'; }
 function renderHero() {
   const online = S.online[S.cls], p = S.period;
   const base = [`<span class="stat"><span class="dot ${online ? 'on' : ''}"></span>${online ? '大屏在线' : '大屏未连接'}</span>`,
-    p ? `<span class="stat">${ic('clock', 'sm')}${p.in_class ? `第${p.period}节上课中 · ${p.end} 下课` : '课间 / 非上课时间'}</span>` : ''];
+    S.exam ? `<span class="stat" style="background:#e3edf8;color:#1d4f80">${ic('cal', 'sm')}考试中 · ${esc(S.exam.subject)} ${esc(S.exam.start)}–${esc(S.exam.end)}<button class="btn soft sm" style="margin-left:8px;padding:2px 10px" data-exend="${S.exam.id}:${S.exam.idx}">提前结束</button></span>`
+      : p ? `<span class="stat">${ic('clock', 'sm')}${p.in_class ? `第${p.period}节上课中 · ${p.end} 下课` : '课间 / 非上课时间'}</span>` : ''];
   const H = {
-    call: [`${greet()}，${esc(me)}`, `${esc(S.cls)} · 选好学生和地点，一键喊话到教室大屏`, base],
+    call: [`${greet()}，${esc(me)}`, `${esc(S.cls)} · 说一句话，推送到教室大屏`, base],
     homework: ['布置作业', '统一记录各科作业，班主任随时看总量', [...base.slice(0, 1), S.hwTotal != null ? `<span class="stat">${ic('clock', 'sm')}今日共 ${S.hwTotal} 分钟</span>` : '']],
-    remind: ['定时提醒', '设置一次，到点自动推送到大屏', [S.remCount != null ? `<span class="stat">${ic('repeat', 'sm')}已设置 ${S.remCount} 条</span>` : '', base[0]]],
-    tools: ['课堂工具', '用手机控制大屏：倒计时、随机抽号、错题投屏', base],
-    board: ['大屏待机页', '一体机空闲时显示时钟、倒计时、公告和今日作业', base.slice(0, 1)],
+    tools: ['课堂工具', '用手机控制大屏：倒计时、随机抽号、发文件', base],
+    board: ['大屏待机页', '一体机空闲时显示时钟、倒计时、留言和今日作业', base.slice(0, 1)],
     log: ['发送记录', '每一条消息的送达和确认情况', base.slice(0, 1)],
-    study: ['学情', '错题投屏、面批名单，把诊断结果用起来', base.slice(0, 1)],
+    study: ['学情', '面批名单，把诊断结果用起来', base.slice(0, 1)],
     duty: ['班务', '积分表扬、值日安排、考勤，一目了然', base.slice(0, 1)],
   }[S.view];
   $('#hero').innerHTML = `<span class="bubble" style="width:160px;height:160px;right:-40px;bottom:-70px"></span>
@@ -1132,36 +1141,19 @@ function syncChips() {
 }
 
 // ---------- 喊话 ----------
-function renderCall() { renderStudents(); loadPhrases(); updatePreview(); renderRecent(); }
-function renderStudents() {
-  const c = cls();
-  if (!c || !c.students.length) { $('#students').innerHTML = empty('这个班还没有学生名单'); return; }
-  const kw = $('#search').value.trim();
-  const names = c.students.map(s => s.name);
-  $('#students').innerHTML = c.students.filter(s => !kw || s.name.includes(kw) || s.no.includes(kw)).map(s => {
-    const dup = names.filter(n => n === s.name).length > 1;
-    const on = S.student && S.student.no === s.no && S.student.name === s.name;
-    const [bg, fg] = AV[hash(s.name) % AV.length];
-    return `<button class="stu ${on ? 'on' : ''}" data-no="${esc(s.no)}" data-name="${esc(s.name)}">
-      <span class="av" style="background:${bg};color:${fg}">${esc(s.name.slice(-1))}</span><span class="nm">${esc(s.name)}</span>${dup ? `<small>${esc(s.no)}</small>` : ''}</button>`;
-  }).join('') || empty('没有找到');
-}
+function renderCall() { loadPhrases(); updatePreview(); renderRecent(); loadReminders(); }
 function buildText() {
-  if (S.mode === 'notice') return $('#notice').value.trim();
-  if (!S.student) return '';
-  const place = $('#placeCustom').value.trim() || S.place;
-  const extra = $('#extra').value.trim();
-  return `请${S.cls}${S.student.name}同学${S.timing || ''}到${place}${extra ? '，' + extra : ''}`;
+  return $('#notice').value.trim();
 }
 function modeText() {
-  const v = $('#optVoice').checked ? `语音播报（${$('#voiceSel').selectedOptions[0]?.text.split(' ·')[0]}）` : '仅显示，不出声';
+  const v = $('#optSpeak').checked ? `语音播报（${$('#voiceSel').selectedOptions[0]?.text.split(' ·')[0]}）` : '仅显示，不出声';
   const extra = $('#optUrgent').checked ? '紧急：上课也弹大窗' : $('#optDefer').checked ? '上课中则下课后发送' : '上课中只在角落显示';
   return `${v} · ${extra}`;
 }
 function updatePreview() {
   const t = buildText();
-  $('#pvHead').textContent = `${me} · 现在`;
-  $('#preview').textContent = t || (S.mode === 'call' ? '请先选择学生' : '请输入消息内容');
+  $('#pvHead').textContent = `${me} · ${atTime() ? '今天 ' + atTime() : '现在'}`;
+  $('#preview').textContent = t || '请输入消息内容';
   $('#preview').classList.toggle('empty', !t);
   $('#pvMode').textContent = modeText();
   $('#sendBtn').disabled = !t || !S.cls;
@@ -1172,22 +1164,66 @@ function renderPhrases(items) {
   $('#phrases').innerHTML = items.map(p => `<span class="chip" data-phrase="${esc(p.text)}" style="cursor:pointer">${esc(p.text)}${p.mine === false ? '' : `<span class="x" data-delphrase="${p.id}">${ic('x', 'sm')}</span>`}</span>`).join('')
     || '<span class="me">还没有常用语</span>';
 }
-function openConfirm() {
-  $('#cfWho').textContent = S.cls + (S.mode === 'call' ? ` · ${S.student.name}` : '');
-  $('#cfText').textContent = buildText(); $('#cfMode').textContent = modeText();
-  $('#confirmMask').classList.remove('hidden');
+// 发送前的说明：上课、晚自习、考试时这条会怎么显示（不弹确认框，发错了靠撤回）
+function renderTip() {
+  const p = S.period, urgent = $('#optUrgent').checked, speak = $('#optSpeak').checked, tip = $('#qTip');
+  let h = '';
+  if (atTime() && S.remDays.length) h = `<b>${DAYS_TXT(S.remDays)} ${atTime()} 自动发到大屏</b>，保存后在下面「定时提醒」里能改、能暂停。可以写 {值日}，发的时候换成当天值日生。`;
+  else if (atTime()) h = `<b>定时：今天 ${atTime()} 发送</b>，发出前可以在「记录」里撤回。到时候正在上课的话，只在右下角小字显示，要弹大窗就打开「紧急」。`;
+  else if (S.exam && !urgent) h = `<b>这个班正在考试</b>（${esc(S.exam.subject)} ${esc(S.exam.start)}–${esc(S.exam.end)}）：普通消息考完再显示。急事请打开「紧急」。`;
+  else if (p && p.in_class) {
+    const when = `现在是${p.evening ? '晚自习' : '上课'}时间（${p.evening ? '' : `第${p.period}节，`}${esc(p.end)} 下课）`;
+    h = urgent ? `${when}：这条会<b>弹大窗</b>${speak ? '<b>并读出来</b>' : '，<b>不读出来</b>'}。`
+      : `${when}：这条会在<b>右下角小字</b>显示，${speak ? '<b>会读出来</b>' : '<b>不读出来</b>'}。要弹大窗就打开「紧急」${speak ? '' : '，要读出来就打开「播报」'}。`;
+  }
+  tip.innerHTML = h; tip.classList.toggle('hidden', !h);
+}
+// 播报默认：课间开、上课关；上课/下课切换时、发完一条后回到默认
+function speakDefault() {
+  const inClass = !!(S.period && S.period.in_class);
+  $('#optSpeak').checked = !inClass; S.speakFor = inClass; renderTip(); updatePreview();
+}
+// 定时发送：只能定今天；打开时默认 10 分钟后（取整到 5 分钟）
+function atTime() { return $('#optAt').checked && $('#optAtTime').value || ''; }
+function setAt(on) {
+  $('#optAt').checked = on; $('#optAtTime').classList.toggle('hidden', !on);
+  if (on && !$('#optAtTime').value) {  // 按北京时间算（服务器也按北京时间）
+    const m = Math.ceil((Date.now() / 60000 + 8 * 60 + 10) / 5) * 5 % 1440;
+    $('#optAtTime').value = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; }
+  if (!on) { $('#optAtTime').value = ''; S.remDays = []; S.remEdit = null; }
+  $('#atRepeat').classList.toggle('hidden', !on); syncChips();
+  renderTip(); quickParse();
+}
+let undoTimer;
+function showUndo(ids, text) {
+  clearInterval(undoTimer); $$('.undobar').forEach(x => x.remove());
+  const bar = document.createElement('div'); bar.className = 'undobar';
+  bar.style.cssText = 'position:fixed;left:50%;bottom:calc(28px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#1f2a24;color:#fff;border-radius:14px;padding:13px 20px;font-size:15.5px;display:flex;gap:20px;align-items:center;box-shadow:0 8px 30px rgba(0,0,0,.25);z-index:200;white-space:nowrap;max-width:calc(100vw - 32px)';
+  bar.innerHTML = `<span style="overflow:hidden;text-overflow:ellipsis">✓ ${esc(text)}</span><button style="background:none;border:0;color:#7ee2b8;font-size:15.5px;font-weight:700;cursor:pointer;padding:0;flex-shrink:0">撤回 · <span>5</span></button>`;
+  document.body.appendChild(bar);
+  let n = 5;
+  const end = () => { clearInterval(undoTimer); bar.remove(); };
+  undoTimer = setInterval(() => { n--; if (n <= 0) end(); else bar.querySelector('button span').textContent = n; }, 1000);
+  bar.querySelector('button').onclick = async () => {
+    end();
+    try { for (const id of ids) await api('/api/recall', { id }); toast('已撤回'); refresh(); } catch (e) { toast('撤回失败：' + e.message); }
+  };
 }
 async function send() {
-  $('#confirmMask').classList.add('hidden');
+  const text = buildText(); if (!text || !S.cls || S.sending) return;  // 合成语音要几秒，期间再按回车不重复发
+  const speak = $('#optSpeak').checked, btn = $('#qSend'), label = btn.innerHTML;
+  S.sending = true; btn.disabled = true; btn.textContent = '发送中…';
   try {
-    const r = await api('/api/send', { classes: [S.cls], text: buildText(), who: S.mode === 'call' && S.student ? S.student.name : '', voice: $('#optVoice').checked,
-      urgent: $('#optUrgent').checked, defer: $('#optDefer').checked, ...voiceOpts() });
-    toast(r.scheduled ? '已安排，下课后自动发送' : '已发送 ✓');
-    if (S.mode === 'call') { S.student = null; $('#extra').value = ''; renderStudents(); } else $('#notice').value = '';
-    $('#qText').value = ''; $('#qSend').disabled = true; S.timing = ''; $('#qRes').innerHTML = Q_HINT;
-    updatePreview(); refresh();
+    const r = await api('/api/send', { classes: [S.cls], text, who: S.who || '', voice: speak,
+      loud: speak && !!(atTime() || S.period && S.period.in_class), urgent: $('#optUrgent').checked, defer: $('#optDefer').checked, at: atTime(), ...voiceOpts() });
+    showUndo(r.ids || [], r.exam ? '那时正在考试，考完后在大屏显示' : atTime() ? `已定时，今天 ${atTime()} 发到${S.cls}大屏` : r.scheduled ? '已安排，下课后自动发送' : `已发送到${S.cls}大屏`);
+    $('#notice').value = '';
+    $('#qText').value = ''; $('#qSend').disabled = true; S.timing = ''; S.who = ''; $('#qRes').innerHTML = Q_HINT;
+    $('#optUrgent').checked = false; setAt(false); speakDefault(); refresh();
   } catch (e) { toast('发送失败：' + e.message); }
+  S.sending = false; btn.innerHTML = label; btn.disabled = !$('#qText').value.trim();
 }
+
 
 // 一句话喊话：从一句话里找出学生、地点、时间和要带的东西（纯规则，不联网）
 function parseUtter(raw, names, places, subjects, defaultPlace) {
@@ -1315,6 +1351,7 @@ const Q_HINT = '<span class="k">例子：小明加2分作业优秀 · 抽一个�
 const DAYS_TXT = d => d.length === 7 ? '每天' : d.join() === '1,2,3,4,5' ? '工作日' : '每周' + d.map(x => DAYS[x - 1]).join('、');
 S.intent = null;
 function quickParse() {
+  if (atTime()) return quickParseTimed();
   const raw0 = $('#qText').value.trim();
   const c0 = cls();
   S.intent = raw0 && c0 ? parseIntent(raw0, { names: c0.students.map(s => s.name), subjects: subjOf(), subject: S.subject }) : null;
@@ -1340,7 +1377,7 @@ async function runIntent() {
     else if (it.type === 'timer') { const r = await api('/api/tools/timer', { class: S.cls, seconds: it.seconds, label: it.label });
       S.timer = { id: r.id, end_at: r.end_at, label: it.label, cls: S.cls }; store.set('cc_timer', JSON.stringify(S.timer)); done('大屏开始计时，可在"课堂"里停止'); }
     else if (it.type === 'pick') { const r = await api('/api/tools/pick', { class: S.cls, voice: true, ...voiceOpts() }); S.picks.unshift(r.name); done(`抽到：${r.name}`); }
-    else if (it.type === 'remind') { await api('/api/reminders/save', { classes: [S.cls], time: it.time, days: it.days, text: it.text, voice: true, ...voiceOpts() }); done(`已设置：${DAYS_TXT(it.days)} ${it.time} 提醒`); }
+    else if (it.type === 'remind') { await api('/api/reminders/save', { classes: [S.cls], time: it.time, days: it.days, text: it.text, voice: true, ...voiceOpts() }); done(`已设置：${DAYS_TXT(it.days)} ${it.time} 提醒`); loadReminders(); }
     else if (it.type === 'points') { await api('/api/points/add', { class: S.cls, names: it.names, delta: it.delta, reason: it.reason, praise: it.delta > 0, ...voiceOpts() });
       done(`${it.names.join('、')} ${it.delta > 0 ? '+' : ''}${it.delta} 分 ✓` + (it.delta > 0 ? '，已在大屏表扬' : '')); }
   } catch (e) { toast(e.message); }
@@ -1351,30 +1388,32 @@ function quickParseCall() {
   if (!raw) { $('#qRes').innerHTML = Q_HINT; return; }
   const c = cls(); if (!c) return;
   const r = parseUtter(raw, c.students.map(s => s.name), D.places, subjOf(), S.place || D.places[0]);
-  const extra = [r.timing, r.carry].filter(Boolean).join('，');
-  if (r.students.length === 1) {
-    setMode('call');
-    const st = c.students.find(s => s.name === r.students[0]);
-    S.student = { no: st.no, name: st.name };
-    if (D.places.includes(r.place)) { S.place = r.place; $('#placeCustom').value = ''; } else $('#placeCustom').value = r.place;
-    $('#extra').value = r.carry; S.timing = r.timing;
-    renderStudents(); syncChips();
-  } else if (r.students.length > 1) {
-    setMode('notice');
-    $('#notice').value = `请${S.cls}${r.students.join('、')}同学${r.timing}到${r.place}${r.carry ? '，' + r.carry : ''}`;
-  } else {
-    setMode('notice');
-    $('#notice').value = raw;
-  }
+  // 老师打的字原样发，不改写；认出的学生只用来提示和记录"喊的是谁"
+  setMode('notice');
+  $('#notice').value = raw;
+  S.who = r.students.join('、');
   updatePreview();
-  const chip = (k, v, warn) => `<span class="k">${k}</span><span class="v ${warn ? 'warn' : ''}">${esc(v)}</span>`;
-  $('#qRes').innerHTML = r.students.length
-    ? chip('学生', r.students.join('、')) + chip('地点', r.place + (r.placeGuessed ? '（没听到地点，用默认）' : ''), r.placeGuessed) + (extra ? chip('补充', extra) : '')
-    : chip('没有认出学生', '将作为普通消息发送', true);
+  $('#qRes').innerHTML = '';
 }
-function setMode(m) {
-  S.mode = m; $$('#modeSeg button').forEach(x => x.classList.toggle('on', x.dataset.mode === m));
-  $('#callBox').classList.toggle('hidden', m !== 'call'); $('#noticeBox').classList.toggle('hidden', m !== 'notice');
+function setMode(m) { S.mode = m; }
+function quickParseTimed() {
+  const raw = $('#qText').value.trim(), rep = S.remDays.length;
+  S.intent = null; setMode('notice'); $('#notice').value = raw; S.who = ''; updatePreview();
+  $('#qSend').lastChild.textContent = S.remEdit ? '保存修改' : rep ? '保存提醒' : '定时发送';
+  $('#qSend').disabled = !raw;
+  $('#qRes').innerHTML = (S.remEdit ? '<span class="k">正在修改定时提醒</span><button class="btn ghost sm" id="remCancel">不改了</button><button class="btn ghost sm" id="remDel" style="color:#ef5a5a">删除这条</button>' : '')
+    + (raw ? `<span class="k">${rep ? esc(DAYS_TXT(S.remDays)) : '今天'} ${esc(atTime())}</span><span class="v">${esc(raw)}</span>` : '');
+}
+async function saveTimed() {  // 定时 + 重复：存成定时提醒
+  const text = $('#qText').value.trim(); if (!text || S.sending) return;
+  S.sending = true;
+  try {
+    await api('/api/reminders/save', { id: S.remEdit, classes: [S.cls], time: atTime(), days: S.remDays, text,
+      voice: $('#optSpeak').checked, urgent: $('#optUrgent').checked, ...voiceOpts() });
+    toast(`已设置：${DAYS_TXT(S.remDays)} ${atTime()} ✓`);
+    $('#qText').value = ''; $('#optUrgent').checked = false; setAt(false); speakDefault(); loadReminders();
+  } catch (e) { toast(e.message); }
+  S.sending = false;
 }
 
 // ---------- 作业 ----------
@@ -1419,13 +1458,11 @@ async function loadNotes() {
   $('#ntSubjects').innerHTML = [['', '不写科目'], ...subjOf().map(x => [x, x])].map(([v, t]) => `<button class="chip ${v === S.ntSubject ? 'on' : ''}" data-ntsubj="${esc(v)}">${esc(t)}</button>`).join('');
   $('#ntKeep').innerHTML = NT_KEEP.map(([v, t]) => `<button class="chip ${v === S.ntKeep ? 'on' : ''}" data-ntkeep="${v}">${t}</button>`).join('');
   const until = d => d ? `显示到 ${+d.slice(5, 7)}/${+d.slice(8)}` : '一直显示';
-  $('#ntList').innerHTML = (r.notice ? `<div class="item"><span class="subj" style="background:#fff3d6;color:#b46d00">公告</span>
-      <div class="main"><div class="txt" style="margin:0;font-weight:600;white-space:pre-wrap">${esc(r.notice)}</div><div class="meta"><span>班主任在「大屏」页修改</span></div></div></div>` : '')
-    + r.items.map(n => `<div class="item"><span class="subj" style="background:#fff3d6;color:#b46d00">${esc(n.subject || '留言')}</span>
+  $('#ntList').innerHTML = r.items.map(n => `<div class="item"><span class="subj" style="background:#fff3d6;color:#b46d00">${esc(n.subject || '留言')}</span>
       <div class="main"><div class="txt" style="margin:0;font-weight:600;word-break:normal;overflow-wrap:break-word">${esc(n.text)}</div>
       <div class="meta"><span>${ic('user', 'sm')}${esc(n.teacher)}</span><span>${ic('cal', 'sm')}${until(n.until)}</span></div></div>
       ${n.can_delete ? `<button class="btn ghost sm" data-ntdel="${n.id}" title="删除">${ic('trash', 'sm')}</button>` : ''}</div>`).join('')
-    || '<div class="me">大屏上现在没有公告和留言</div>';
+    || '<div class="me">大屏上现在没有留言</div>';
 }
 async function addNote() {
   const text = $('#ntText').value.trim();
@@ -1493,7 +1530,7 @@ let remItems = [];
 async function loadReminders() {
   syncChips();
   try { remItems = (await api('/api/reminders')).items.filter(r => r.classes.includes(S.cls)); } catch { return; }
-  S.remCount = remItems.length; if (S.view === 'remind') renderHero();
+  $('#remCard').classList.toggle('hidden', !remItems.length);
   $('#remList').innerHTML = remItems.map(r => `
     <div class="item" style="cursor:pointer;opacity:${r.enabled ? 1 : .5}" data-editrem="${r.id}">
       <div class="rem-time">${esc(r.time)}</div>
@@ -1502,28 +1539,17 @@ async function loadReminders() {
       <label class="switch" data-stop="1"><input type="checkbox" data-togglerem="${r.id}" ${r.enabled ? 'checked' : ''}><span class="track"></span></label>
     </div>`).join('') || empty('还没有定时提醒，比如每天 17:10 提醒值日');
 }
-function editReminder(r) {
-  S.remEdit = r ? r.id : null;
-  $('#remTime').value = r ? r.time : '17:10'; $('#remText').value = r ? r.text : '';
-  $('#remVoice').checked = r ? !!r.voice : true; $('#remUrgent').checked = r ? !!r.urgent : false;
-  S.remDays = r ? [...r.days] : [1, 2, 3, 4, 5];
-  $('#remFormTitle').textContent = r ? '编辑提醒' : '新建定时提醒';
-  $('#remSave span').textContent = r ? '保存修改' : '保存提醒';
-  $('#remCancel').classList.toggle('hidden', !r);
-  if (r && !$('#remDel')) $('#remCancel').insertAdjacentHTML('afterend', `<button class="btn danger" id="remDel" style="padding:15px 18px">${ic('trash', 'sm')}删除</button>`);
-  if (!r) $('#remDel')?.remove();
-  syncChips(); window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-async function saveReminder(extra = {}) {
-  const body = { id: S.remEdit, classes: [S.cls], time: $('#remTime').value, days: S.remDays, text: $('#remText').value.trim(),
-    voice: $('#remVoice').checked, urgent: $('#remUrgent').checked, ...voiceOpts(), ...extra };
-  try { await api('/api/reminders/save', body); toast('已保存 ✓'); editReminder(null); loadReminders(); } catch (e) { toast(e.message); }
+function editReminder(r) {  // 修改：填回一句话输入框，开着定时
+  if (!r) { setAt(false); $('#qText').value = ''; return quickParse(); }
+  $('#qText').value = r.text; $('#optSpeak').checked = !!r.voice; $('#optUrgent').checked = !!r.urgent;
+  setAt(true); S.remEdit = r.id; S.remDays = [...r.days]; $('#optAtTime').value = r.time;
+  syncChips(); renderTip(); quickParse(); window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 // ---------- 课堂 ----------
 const fmt = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 function renderTools() {
-  loadImages();
+  loadFiles();
   try { S.timer = JSON.parse(store.get('cc_timer') || 'null'); } catch { S.timer = null; }
   tickTimer();
   $('#pickHist').innerHTML = S.picks.length ? S.picks.map(n => `<span class="chip">${esc(n)}</span>`).join('') : '<span class="me">还没有</span>';
@@ -1582,10 +1608,51 @@ function renderTimetable() {
     per.map((p, i) => `<tr${p[0] >= '18:00' ? ' style="background:#f6f4ff"' : ''}><td style="white-space:nowrap">${p[0] >= '18:00' ? '晚' + (i + 1 - per.filter(q => q[0] < '18:00').length) : i + 1}<div class="me" style="font-size:11px;display:block">${p[0]}</div></td>${days.map(d =>
       `<td><input class="input" data-tt="${d}-${i}" value="${esc(((tt[d] || [])[i] || {}).subject || '')}" maxlength="6" style="padding:6px 4px;text-align:center;min-width:52px"></td>`).join('')}</tr>`).join('') + '</tbody>';
 }
+// 考试大屏
+const bjToday = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+const mdText = d => `${+d.slice(5, 7)}月${+d.slice(8, 10)}日`;
+async function loadExamBoard() {
+  let r; try { r = await api('/api/exams?class=' + encodeURIComponent(S.cls)); } catch { return; }
+  S.exams = r.items; S.examNotice = r.default_notice;
+  const tag = { live: '<span class="tag" style="background:#e3edf8;color:#1d4f80">大屏显示中</span>', ended: '<span class="tag st-expired">已提前结束</span>', done: '<span class="tag st-expired">已考完</span>', todo: '' };
+  $('#examList').innerHTML = r.items.map(e => `<div class="item" style="align-items:flex-start"><div class="main">
+      <div class="txt" style="margin:0;font-weight:700">${esc(e.name)}${e.classes.length > 1 ? `<span class="me" style="font-weight:400;margin-left:8px">${e.classes.length} 个班</span>` : ''}</div>
+      ${e.sessions.map(x => `<div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap;font-size:14px"><span style="font-variant-numeric:tabular-nums">${mdText(x.date)} ${x.start}–${x.end}</span><b>${esc(x.subject)}</b>${tag[x.state] || ''}
+        ${x.state === 'live' ? `<button class="btn soft sm" data-exend="${e.id}:${x.idx}">提前结束</button>` : ''}</div>`).join('')}
+      <div class="meta" style="margin-top:6px"><span>${ic('user', 'sm')}${esc(e.creator)}</span></div></div>
+      ${e.can_edit ? `<button class="btn ghost sm" data-exedit="${e.id}">编辑</button><button class="btn ghost sm" data-exdel="${e.id}" title="删除">${ic('trash', 'sm')}</button>` : ''}</div>`).join('')
+    || '<div class="me" style="padding:4px 0">还没有考试安排</div>';
+}
+function exRow(x = {}) {
+  return `<div class="exrow" style="display:flex;gap:6px 10px;flex-wrap:wrap;margin-bottom:10px;padding-bottom:10px;border-bottom:1px dashed var(--line)">
+    <div style="display:flex;gap:6px;flex:1 1 250px"><input class="input" data-k="subject" list="examSubjects" placeholder="科目" maxlength="10" style="flex:0 0 88px;min-width:0" value="${esc(x.subject || '')}">
+      <input class="input" type="date" data-k="date" style="flex:1;min-width:0" value="${esc(x.date || '')}"></div>
+    <div style="display:flex;gap:6px;align-items:center;flex:1 1 250px"><input class="input" type="time" data-k="start" style="flex:1;min-width:0" value="${esc(x.start || '')}"><span class="me">到</span>
+      <input class="input" type="time" data-k="end" style="flex:1;min-width:0" value="${esc(x.end || '')}">
+      <button class="btn ghost sm" data-exdelrow title="删掉这一场">${ic('x', 'sm')}</button></div></div>`;
+}
+function openExamForm(e) {
+  S.exEdit = e ? e.id : null;
+  $('#examName').value = e ? e.name : '';
+  $('#examRows').innerHTML = (e ? e.sessions : [{ date: bjToday() }]).map(exRow).join('');
+  $('#examNotice').value = e ? e.notice : S.examNotice || '';
+  $('#examSubjects').innerHTML = ((D.class_subjects || {})[S.cls] || D.subjects || []).map(x => `<option value="${esc(x)}">`).join('');
+  S.exClasses = new Set(e ? e.classes : [S.cls]);
+  $('#examClsBox').classList.toggle('hidden', !D.admin);  // 班主任只能给自己的班设
+  $('#examClasses').innerHTML = D.classes.map(c => `<button class="chip ${S.exClasses.has(c.name) ? 'on' : ''}" data-excls="${esc(c.name)}">${esc(c.name)}</button>`).join('');
+  $('#examForm').classList.remove('hidden'); $('#examNew').classList.add('hidden');
+}
+function closeExamForm() { $('#examForm').classList.add('hidden'); $('#examNew').classList.remove('hidden'); }
+async function saveExam() {
+  const sessions = $$('#examRows .exrow').map(r => Object.fromEntries([...r.querySelectorAll('[data-k]')].map(i => [i.dataset.k, i.value.trim()])));
+  try {
+    await api('/api/exams/save', { id: S.exEdit, name: $('#examName').value, classes: [...S.exClasses], sessions, notice: $('#examNotice').value });
+    toast('已保存 ✓ 到时间大屏会自动显示'); closeExamForm(); loadExamBoard();
+  } catch (err) { toast(err.message); }
+}
 async function loadBoard() {
-  loadSchedule();
+  loadSchedule(); loadExamBoard();
   try { S.settings = await api('/api/settings?class=' + encodeURIComponent(S.cls)); } catch { return; }
-  $('#bdNotice').value = (S.settings.notices || {})[S.cls] || '';
   const qt = S.settings.quotes || {};
   $('#qtOn').checked = qt.enabled !== false; $('#qtBuiltin').checked = qt.builtin !== false;
   $('#qtBuiltinLabel').textContent = `使用内置的励志名言和古诗词（${S.settings.builtin_quotes || 0} 条）`;
@@ -1597,9 +1664,11 @@ async function loadBoard() {
   FONTS.filter(f => f.id === 'misans' || f.id === 'wenkai').forEach(loadFontCss);
   $('#sbOn').checked = !!sb.enabled;
   $('#sbStars').checked = S.settings.board_points !== false;
+  $('#sbTools').checked = S.settings.tools_tab !== false;
   $('#sbIdle').innerHTML = [3, 5, 10, 15].map(m => `<button class="chip" data-sbidle="${m}">${m}</button>`).join('');
   syncBoardChips();
   renderCd(S.settings.countdowns || []); renderBoardPreview(); renderTimetable();
+  $('#epText').value = (S.settings.eve_plan || []).map(p => `${p.start}-${p.end} ${p.text}`).join('\n');
   S.sjOn = [...(S.settings.subjects || D.subjects)];
   S.sjAll = [...new Set([...(S.settings.default_subjects || D.subjects), ...S.sjOn])];
   renderSjChips();
@@ -1618,12 +1687,11 @@ function renderCd(list) {
 }
 const readCd = () => $$('#cdRows .cd-row').map(r => ({ name: r.querySelector('[data-cdname]').value.trim(), date: r.querySelector('[data-cddate]').value }));
 async function renderBoardPreview() {
-  const now = new Date(), cds = readCd().filter(c => c.name && c.date), notice = $('#bdNotice').value.trim();
+  const now = new Date(), cds = readCd().filter(c => c.name && c.date);
   let hw = []; try { hw = (await api('/api/homework?class=' + encodeURIComponent(S.cls))).items; } catch {}
   $('#bdPreview').innerHTML = `<div class="clock">${now.toLocaleTimeString('zh-CN', { ...BJ, hour: '2-digit', minute: '2-digit', hour12: false })}</div>
     <div class="muted">${now.toLocaleDateString('zh-CN', { ...BJ, month: 'long', day: 'numeric', weekday: 'long' })} · ${esc(S.cls)}</div>
     <div class="cds">${cds.map(c => `<span class="cd">距${esc(c.name)}<b>${Math.max(0, Math.round((new Date(c.date + 'T00:00:00') - bjDay()) / 864e5))}</b>天</span>`).join('')}</div>
-    ${notice ? `<div class="notice">${ic('note', 'sm')}<span>${esc(notice)}</span></div>` : ''}
     ${$('#qtOn').checked && S.settings && S.settings.quote_now ? `<div style="margin-top:12px;text-align:center;color:#2f4a6b;font-weight:700">${esc(S.settings.quote_now.text)} <span style="color:var(--muted);font-weight:400;font-size:12px">${S.settings.quote_now.by ? '—— ' + esc(S.settings.quote_now.by) : ''}</span></div>` : ''}
     <div class="hw"><div class="muted" style="margin:0 0 4px">今日作业</div>${hw.map(h => `<div><b style="color:${SUBJ_COLOR[h.subject] || '#3b9cf5'}">${esc(h.subject)}</b>　${esc(h.content)}</div>`).join('') || '<div class="muted">暂无</div>'}</div>`;
 }
@@ -1632,10 +1700,31 @@ function syncBoardChips() {
   $$('[data-sbmode]').forEach(b => b.classList.toggle('on', b.dataset.sbmode === S.sbMode));
   $$('[data-sfont]').forEach(b => b.classList.toggle('on', b.dataset.sfont === S.sfont));
 }
+function readPlan() {  // 晚自习时间安排：一行"19:00-19:40 语文"；有写错的行返回 null
+  const out = [];
+  for (const l of $('#epText').value.split('\n').map(x => x.trim()).filter(Boolean)) {
+    const m = l.match(/^(\d{1,2})[:：](\d{2})\s*[-–—~～到至]\s*(\d{1,2})[:：](\d{2})\s*(.+)$/);
+    const hm = (h, mi) => h.padStart(2, '0') + ':' + mi;
+    if (!m || +m[1] > 23 || +m[3] > 23 || +m[2] > 59 || +m[4] > 59 || hm(m[1], m[2]) >= hm(m[3], m[4])) { toast('这一行没看懂：' + l); return null; }
+    out.push({ start: hm(m[1], m[2]), end: hm(m[3], m[4]), text: m[5].trim() });
+  }
+  if (out.length > 6) { toast('最多 6 行'); return null; }
+  return out;
+}
+$('#sbTools').addEventListener('change', async () => {  // 开关一拨就保存
+  try { await api('/api/settings', { class: S.cls, tools_tab: $('#sbTools').checked }); toast($('#sbTools').checked ? '大屏右边会显示「工具」把手 ✓' : '已关掉大屏「工具」把手 ✓'); }
+  catch (e) { toast(e.message); }
+});
+$('#epSave').onclick = async () => {
+  const plan = readPlan(); if (!plan) return;
+  try { await api('/api/settings', { class: S.cls, eve_plan: plan }); toast(plan.length ? '时间安排已保存，大屏一分钟内更新 ✓' : '时间安排已撤掉 ✓'); }
+  catch (e) { toast(e.message); }
+};
 async function saveBoard() {
-  try { await api('/api/settings', { class: S.cls, notice: $('#bdNotice').value, countdowns: readCd(),
-      standby: { enabled: $('#sbOn').checked, idle_minutes: S.sbIdle, mode: S.sbMode }, screen_font: S.sfont, board_points: $('#sbStars').checked,
-      quotes: { enabled: $('#qtOn').checked, builtin: $('#qtBuiltin').checked, custom: $('#qtCustom').value.split('\n') } }); toast('已保存 ✓'); loadBoard(); }
+  const plan = readPlan(); if (!plan) return;
+  try { await api('/api/settings', { class: S.cls, countdowns: readCd(), eve_plan: plan,
+      standby: { enabled: $('#sbOn').checked, idle_minutes: S.sbIdle, mode: S.sbMode }, screen_font: S.sfont, board_points: $('#sbStars').checked, tools_tab: $('#sbTools').checked,
+      quotes: { enabled: $('#qtOn').checked, builtin: $('#qtBuiltin').checked, custom: $('#qtCustom').value.split('\n') }, prep: prepBody() }); toast('已保存 ✓'); loadBoard(); }
   catch (e) { toast(e.message); }
 }
 
@@ -1698,32 +1787,41 @@ async function saveDuty() {
   try { await api('/api/settings', { class: S.cls, duty: S.duty }); toast('值日表已保存 ✓'); renderDuty(); } catch (e) { toast(e.message); }
 }
 
-// ---------- 课堂：错题投屏 ----------
-S.img = null; S.imgSec = 0; S.imgs = [];
-async function loadImages() {
-  $('#imgTimer').innerHTML = [[0, '不计时'], [3, '3 分钟'], [5, '5 分钟'], [10, '10 分钟'], [15, '15 分钟']]
-    .map(([m, t]) => `<button class="chip" data-imgsec="${m * 60}">${t}</button>`).join('');
-  try { S.imgs = (await api('/api/quiz?class=' + encodeURIComponent(S.cls))).images || []; } catch {}
-  renderImages();
+// ---------- 课堂：发文件到大屏 ----------
+const FILE_EXTS = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'pps', 'ppsx', 'xls', 'xlsx', 'wps', 'dps', 'et', 'txt', 'jpg', 'jpeg', 'png', 'mp4', 'mp3', 'html', 'htm'];
+const fmtSize = n => n >= 1048576 ? (n / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n / 1024)) + 'KB';
+async function loadFiles() {
+  let r; try { r = await api('/api/files?class=' + encodeURIComponent(S.cls)); } catch { return; }
+  $('#fileList').innerHTML = r.items.map(f => `<div class="item"><div class="main"><div class="txt" style="margin:0;font-weight:600;word-break:break-all">${esc(f.name)}</div>
+      <div class="meta"><span>${ic('user', 'sm')}${esc(f.by)}</span><span>${ic('clock', 'sm')}${esc(f.time)}</span><span>${fmtSize(f.size)}</span></div></div>
+      ${f.can_delete ? `<button class="btn ghost sm" data-filedel="${f.id}" title="删除">${ic('trash', 'sm')}</button>` : ''}</div>`).join('')
+    || '<div class="me">7 天内没有发过文件</div>';
 }
-function renderImages() {
-  $$('[data-imgsec]').forEach(b => b.classList.toggle('on', +b.dataset.imgsec === S.imgSec));
-  $('#imgPush').disabled = !S.img;
-  $('#imgRecent').innerHTML = S.imgs.map(i => `<button class="${S.img === i.img ? 'on' : ''}" data-imgpick="${esc(i.img)}" title="${esc(i.caption || '')}"><img src="${esc(i.img)}?w=240&h=180" loading="lazy"></button>`).join('') || '<span class="me">还没有</span>';
+function uploadFile(file) {
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  if (!file.name.includes('.') || !FILE_EXTS.includes(ext)) return toast('只能发 Word、PDF、PPT、Excel、网页、图片、mp4 视频这类文件');
+  if (file.size > 50 * 1048576) return toast(`文件太大了（${fmtSize(file.size)}），最大 50MB`);
+  if (!file.size) return toast('文件是空的');
+  if (!offlineOk('/api/send', { classes: [S.cls] })) return;
+  if (S.fileBusy) return toast('上一个文件还在上传');
+  S.fileBusy = true;
+  const done = msg => { S.fileBusy = false; $('#fileProg').classList.add('hidden'); if (msg) toast(msg); };
+  $('#fileProg').classList.remove('hidden'); $('#fileBar').style.width = '0';
+  $('#fileProgTxt').textContent = `正在上传 ${file.name}（${fmtSize(file.size)}）…`;
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', `/api/files/upload?class=${encodeURIComponent(S.cls)}&name=${encodeURIComponent(file.name)}`);
+  xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+  xhr.upload.onprogress = e => { if (e.lengthComputable) { const p = Math.round(e.loaded / e.total * 100);
+    $('#fileBar').style.width = p + '%'; $('#fileProgTxt').textContent = `正在上传 ${file.name}：${p}%`; } };
+  xhr.onload = () => {
+    let j = {}; try { j = JSON.parse(xhr.responseText); } catch {}
+    if (xhr.status === 401) { done(); return showLogin(); }
+    if (xhr.status !== 200) return done(j.error || '上传失败，请重试');
+    done('已发到大屏 ✓ 一体机下载好就会弹出'); loadFiles();
+  };
+  xhr.onerror = () => done('网络断了，请重试');
+  xhr.send(file);
 }
-async function uploadImage(file) {
-  $('#dropInner').innerHTML = '图片处理中…';
-  try {
-    const bmp = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = URL.createObjectURL(file); });
-    const k = Math.min(1, 1800 / Math.max(bmp.width, bmp.height));
-    const cv = Object.assign(document.createElement('canvas'), { width: Math.round(bmp.width * k), height: Math.round(bmp.height * k) });
-    cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
-    const r = await api('/api/upload', { data: cv.toDataURL('image/jpeg', 0.9) });
-    S.img = r.img; $('#dropInner').innerHTML = `<img src="${r.img}?w=900&h=640">`;
-  } catch (e) { $('#dropInner').innerHTML = '上传失败：' + esc(e.message) + '<br>点这里重新选择'; S.img = null; }
-  renderImages();
-}
-
 // ---------- 喊话：按考试成绩面批 ----------
 S.mp = null; S.mpRule = 'half'; S.mpPick = new Set(); S.mpWhen = '下课后'; S.mpList = [];
 async function loadExams() {
@@ -1838,7 +1936,7 @@ function editClass(name) {
   $('#clsForm').classList.toggle('hidden', !c && !S.roster.admin);
   $('#clsFormTitle').textContent = c ? `编辑名单：${c.name}` : '添加班级';
   $('#clsName').value = c ? c.name : '';
-  $('#clsName').disabled = !S.roster.admin;
+  $('#clsName').disabled = !(S.roster.admin || (c && c.role === 'head'));  // 班主任也能改自己班的名字
   $('#clsNew').classList.toggle('hidden', !S.roster.admin);
   $('#clsNames').value = c ? c.names.join('\n') : '';
   $('#clsDropBox').classList.toggle('hidden', !(S.roster.public && c && c.role === 'head'));
@@ -1868,7 +1966,8 @@ async function openInvite(name) {
           : `<button class="btn primary sm" data-invnew="${role}" style="margin-top:12px">生成二维码</button>`}</div>`;
   $('#invGrid').innerHTML = qr('teacher', r.teacher, '任课老师二维码', '能喊话、布置作业、用课堂工具')
     + (S.roster.admin ? qr('head', r.head, '班主任二维码', '本班全部功能，可以邀请任课老师') : '');
-  const row = (m, role) => `<div class="item" style="align-items:center"><div class="main"><b>${esc(m.name)}</b> <span class="me">${role}</span></div>
+  const row = (m, role) => `<div class="item" style="align-items:center;flex-wrap:wrap"><div class="main"><b>${esc(m.name)}</b> <span class="me">${role} · ${esc(m.since)} 加入</span></div>
+    ${S.roster.admin ? `<button class="btn soft sm" data-invrole="${role === '班主任' ? 'teacher' : 'head'}" data-uid="${m.uid}" data-nm="${esc(m.name)}">${role === '班主任' ? '降为任课老师' : '设为班主任'}</button>` : ''}
     ${role === '班主任' && !S.roster.admin ? '' : `<button class="btn ghost sm" data-invrm="${m.uid}">移出</button>`}</div>`;
   $('#invMembers').innerHTML = r.heads.map(m => row(m, '班主任')).join('') + r.teachers.map(m => row(m, '任课老师')).join('') || '<span class="me">还没有老师加入</span>';
 }
@@ -1894,7 +1993,7 @@ function renderExport() {
   const head = ['admin', 'head'].includes(curRole());
   $('#exSub').textContent = head ? '作业和未交统计、积分汇总和明细、考勤统计和明细；选"全部"时再加名单、值日、课程表等设置'
                                  : '本班各科作业、收交情况和未交统计';
-  $('#bkCard').classList.toggle('hidden', !D.admin);
+  $('#bkCard').classList.toggle('hidden', !D.owner);
   $('#exTip').textContent = (head ? '每周班会前导出"本周"（班会在周一就选"上周"），期末导出"全部"存档。' : '可以每周导出一次，期末导出"全部"存档。')
     + '文件保存在你自己的电脑或手机上。' + (/MicroMessenger/i.test(navigator.userAgent) ? '在微信里可能下载不了：点右上角"···"选"在浏览器打开"，或者在电脑上导出。' : '');
   $('#exRange').innerHTML = [['week', '本周'], ['last', '上周'], ['month', '本月'], ['all', '全部']]
@@ -1911,6 +2010,7 @@ $('#exGo').onclick = async () => {
   } catch (e) { toast(e.message); }
 };
 async function loadBackups() {
+  if (!D.owner) return;
   try { renderBackups((await api('/api/backup/list')).items); } catch {}
 }
 function renderBackups(items) {
@@ -1965,14 +2065,15 @@ async function refresh() {
   if (!token || $('#appView').classList.contains('hidden')) return;
   try {
     const r = await api('/api/recent?class=' + encodeURIComponent(S.cls));
-    const changed = JSON.stringify([r.online[S.cls], r.period]) !== JSON.stringify([S.online[S.cls], S.period]);
-    S.online = r.online; S.recent = r.messages; S.period = r.period;
+    const changed = JSON.stringify([r.online[S.cls], r.period, r.exam]) !== JSON.stringify([S.online[S.cls], S.period, S.exam]);
+    S.online = r.online; S.recent = r.messages; S.period = r.period; S.exam = r.exam;
+    if (S.speakFor !== !!(r.period && r.period.in_class)) speakDefault(); else renderTip();
     trackMessages(r.messages);
     $('#clsDot').classList.toggle('on', !!S.online[S.cls]);
     $('#clsDot').title = S.online[S.cls] ? '大屏在线' : '大屏不在线';
     const p = r.period;
-    $('#period').textContent = p.in_class ? `第${p.period}节 · ${p.end} 下课` : `${r.now} · 课间`;
-    $('#period').classList.toggle('in-class', p.in_class);
+    $('#period').textContent = r.exam ? `考试中 · ${r.exam.subject} ${r.exam.end} 结束` : p.in_class ? `第${p.period}节 · ${p.end} 下课` : `${r.now} · 课间`;
+    $('#period').classList.toggle('in-class', !!(p.in_class || r.exam));
     if (changed) renderHero();
     if (S.view === 'call' || S.view === 'log') renderRecent();
   } catch {}
@@ -1987,7 +2088,6 @@ document.addEventListener('click', async e => {
   const g = t.closest('[data-go]'); if (g) return go(g.dataset.go);
   const zm = t.closest('[data-zoom]'); if (zm) return applyZoom(zm.dataset.zoom);
   const fo = t.closest('[data-font]'); if (fo) { fontId = applyFont(fo.dataset.font); $$('[data-font]').forEach(b => b.classList.toggle('on', b === fo)); return; }
-  const st = t.closest('#students [data-name]'); if (st) { S.student = { no: st.dataset.no, name: st.dataset.name }; S.timing = ''; renderStudents(); return updatePreview(); }
   const pl = t.closest('[data-place]'); if (pl) { S.place = pl.dataset.place; $('#placeCustom').value = ''; syncChips(); if ($('#mpBox').open) renderExam(); return updatePreview(); }
   const dp = t.closest('[data-delphrase]');
   if (dp) { e.stopPropagation(); if (!confirm('删除这条常用语？')) return; try { renderPhrases((await api('/api/phrases/delete', { id: +dp.dataset.delphrase })).items); } catch (err) { toast(err.message); } return; }
@@ -1999,9 +2099,16 @@ document.addEventListener('click', async e => {
   const dh = t.closest('[data-delhw]');
   const ns = t.closest('[data-ntsubj]'); if (ns) { S.ntSubject = ns.dataset.ntsubj; $$('[data-ntsubj]').forEach(b => b.classList.toggle('on', b === ns)); return; }
   const nk = t.closest('[data-ntkeep]'); if (nk) { S.ntKeep = nk.dataset.ntkeep; $$('[data-ntkeep]').forEach(b => b.classList.toggle('on', b === nk)); return; }
+  const fd = t.closest('[data-filedel]'); if (fd) { if (!confirm('删除这个文件？已经下载到一体机上的不受影响。')) return; try { await api('/api/files/delete', { id: fd.dataset.filedel }); loadFiles(); } catch (err) { toast(err.message); } return; }
   const nd = t.closest('[data-ntdel]'); if (nd) { if (!confirm('删除这条留言？')) return; try { await api('/api/notes/delete', { id: +nd.dataset.ntdel }); loadNotes(); } catch (err) { toast(err.message); } return; }
   const md = t.closest('[data-mrday]'); if (md) { S.mrDay = +md.dataset.mrday; return loadMorning(); }
   const ms = t.closest('[data-mrsubj]'); if (ms) { S.mrSubject = ms.dataset.mrsubj; $$('[data-mrsubj]').forEach(b => b.classList.toggle('on', b === ms)); return; }
+  const exc = t.closest('[data-excls]'); if (exc) { const c = exc.dataset.excls; S.exClasses.has(c) ? S.exClasses.delete(c) : S.exClasses.add(c); exc.classList.toggle('on', S.exClasses.has(c)); return; }
+  const exRowDel = t.closest('[data-exdelrow]'); if (exRowDel) { exRowDel.closest('.exrow').remove(); return; }
+  const exe = t.closest('[data-exedit]'); if (exe) { openExamForm(S.exams.find(e => e.id === +exe.dataset.exedit)); return; }
+  const exd = t.closest('[data-exdel]'); if (exd) { if (!confirm('删除这个考试安排？')) return; try { await api('/api/exams/delete', { id: +exd.dataset.exdel }); loadExamBoard(); } catch (err) { toast(err.message); } return; }
+  const exn = t.closest('[data-exend]'); if (exn) { if (!confirm('提前结束这一场？大屏会马上收起考试画面。')) return;
+    const [id, idx] = exn.dataset.exend.split(':').map(Number); try { await api('/api/exams/end', { id, idx, class: S.cls }); toast('已结束，大屏几秒内收起'); if (S.exams) loadExamBoard(); refresh(); } catch (err) { toast(err.message); } return; }
   const mdel = t.closest('[data-mrdel]'); if (mdel) { if (!confirm('删除这条早读内容？')) return; try { await api('/api/morning/delete', { id: +mdel.dataset.mrdel }); loadMorning(); } catch (err) { toast(err.message); } return; }
   if (dh) { if (!confirm('删除这条作业？')) return; try { await api('/api/homework/delete', { id: +dh.dataset.delhw }); loadHomework(); } catch (err) { toast(err.message); } return; }
   const cs = t.closest('[data-cstart]');
@@ -2012,7 +2119,8 @@ document.addEventListener('click', async e => {
   if (cd) { const h = hwItems.find(x => x.id === +cd.dataset.cdeduct); if (!h || !h.collect) return;
     if (!confirm(`给未交${h.subject}作业的 ${h.collect.missing.length} 位同学各扣 1 分？\n${h.collect.missing.join('、')}`)) return;
     try { await api('/api/points/add', { class: S.cls, names: h.collect.missing, delta: -1, reason: `未交${h.subject}作业` }); toast('已扣分，可在"班务"里撤销'); } catch (err) { toast(err.message); } return; }
-  const dy = t.closest('[data-day]'); if (dy) { const d = +dy.dataset.day; S.remDays = S.remDays.includes(d) ? S.remDays.filter(x => x !== d) : [...S.remDays, d].sort(); return syncChips(); }
+  const dy = t.closest('[data-day]'); if (dy) { const d = +dy.dataset.day; S.remDays = S.remDays.includes(d) ? S.remDays.filter(x => x !== d) : [...S.remDays, d].sort(); syncChips(); renderTip(); return quickParse(); }
+  if (t.closest('#remCancel')) return editReminder(null);
   if (t.closest('[data-stop]')) return;
   const er = t.closest('[data-editrem]'); if (er) return editReminder(remItems.find(r => r.id === +er.dataset.editrem));
   const pr = t.closest('[data-preset]'); if (pr) return startTimer(+pr.dataset.preset);
@@ -2031,8 +2139,6 @@ document.addEventListener('click', async e => {
   const ar = t.closest('[data-attrow]'); if (ar) { S.attOpen = S.attOpen === ar.dataset.attrow ? null : ar.dataset.attrow; return loadAttend(); }
   const ad = t.closest('[data-attdel]');
   if (ad) { if (!confirm('删除这条考勤登记？')) return; try { await api('/api/attend/delete', { id: +ad.dataset.attdel }); loadAttend(); } catch (err) { toast(err.message); } return; }
-  const isec = t.closest('[data-imgsec]'); if (isec) { S.imgSec = +isec.dataset.imgsec; return renderImages(); }
-  const ipk = t.closest('[data-imgpick]'); if (ipk) { S.img = ipk.dataset.imgpick; $('#dropInner').innerHTML = `<img src="${S.img}?w=900&h=640">`; return renderImages(); }
   const mpe = t.closest('[data-mpexam]'); if (mpe) { S.mp = S.mpList.find(x => x.id === +mpe.dataset.mpexam); S.mpPick = new Set(); return renderExam(); }
   const mpr = t.closest('[data-mprule]'); if (mpr) { S.mpRule = mpr.dataset.mprule; return renderExam(); }
   const mpq = t.closest('[data-mpq]'); if (mpq) { const q = mpq.dataset.mpq; S.mpPick.has(q) ? S.mpPick.delete(q) : S.mpPick.add(q); return renderExam(); }
@@ -2061,13 +2167,18 @@ document.addEventListener('click', async e => {
   const exr = t.closest('[data-exrange]'); if (exr) { S.exRange = exr.dataset.exrange; return renderExport(); }
   const icp = t.closest('[data-invcopy]');
   if (icp) { copyText(icp.dataset.invcopy); return; }
+  const irl = t.closest('[data-invrole]');
+  if (irl) { const head = irl.dataset.invrole === 'head';
+    if (!confirm(head ? `把「${irl.dataset.nm}」设为${S.invCls}的班主任？\n班主任能改名单、管理本班全部内容、邀请任课老师。`
+                      : `把「${irl.dataset.nm}」降为${S.invCls}的任课老师？\n不用重新扫码，他刷新工作台就生效，本班作业照常能发。\n\n记得把"班主任二维码"重新生成一次，旧二维码就作废了。`)) return;
+    try { await api('/api/members/role', { class: S.invCls, uid: irl.dataset.uid, role: irl.dataset.invrole }); openInvite(S.invCls); toast(head ? '已设为班主任 ✓' : '已降为任课老师 ✓'); } catch (err) { toast(err.message); } return; }
   const irm = t.closest('[data-invrm]');
   if (irm) { if (!confirm('把这位老师移出这个班？他将看不到这个班。')) return;
     try { await api('/api/members/remove', { class: S.invCls, uid: irm.dataset.invrm }); openInvite(S.invCls); } catch (err) { toast(err.message); } return; }
   const cdl = t.closest('[data-clsdel]');
   if (cdl) { const n = cdl.dataset.clsdel; if (!confirm(`删除"${n}"？这个班的名单、消息、作业、积分、考勤、设置会全部删掉，无法恢复。`)) return;
     try { await api('/api/roster/delete', { class: n }); if (S.clsEdit === n) editClass(null); await reloadClasses(); toast('已删除'); } catch (err) { toast(err.message); } return; }
-  const dc = t.closest('[data-delcd]'); if (dc) { const l = readCd(); l.splice(+dc.dataset.delcd, 1); renderCd(l); return renderBoardPreview(); }
+  const dc = t.closest('[data-delcd]'); if (dc) { const l = readCd(); l.splice(+dc.dataset.delcd, 1); renderCd(l); renderBoardPreview(); return saveCd(); }
   if (t.closest('#remDel') && S.remEdit) {
     if (!confirm('删除这条提醒？')) return;
     try { await api('/api/reminders/delete', { id: S.remEdit }); editReminder(null); loadReminders(); } catch (err) { toast(err.message); }
@@ -2088,17 +2199,16 @@ document.addEventListener('input', e => {
 $('#clsSel').onchange = () => {
   if ($('#clsSel').value === '__manage__') { $('#clsSel').value = S.cls; return openClasses(); }
   if ($('#clsSel').value === '__register__') { $('#clsSel').value = S.cls; location.href = '/register'; return; } S.cls = $('#clsSel').value; renderNav(); store.set('cc_cls', S.cls); S.student = null; go(S.view); refresh(); };
-$$('#modeSeg button').forEach(b => b.onclick = () => { setMode(b.dataset.mode); updatePreview(); });
 let qTimer;
 $('#qText').addEventListener('input', () => { clearTimeout(qTimer); qTimer = setTimeout(quickParse, 350); });
-const quickGo = () => { quickParse(); if (S.intent && !['call', 'notice'].includes(S.intent.type)) return runIntent(); if (!$('#sendBtn').disabled) openConfirm(); };
-$('#qText').addEventListener('keydown', e => { if (e.key === 'Enter') quickGo(); });
+const quickGo = () => { if (S.sending) return; clearTimeout(qTimer); quickParse(); if (atTime() && S.remDays.length) return saveTimed(); if (S.intent && !['call', 'notice'].includes(S.intent.type)) return runIntent(); if (!$('#sendBtn').disabled) send(); };
+$('#qText').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) quickGo(); });  // 输入法选字时的回车不算发送
 $('#qSend').onclick = quickGo;
-$('#search').oninput = renderStudents;
-['#placeCustom', '#extra', '#notice'].forEach(s => $(s).addEventListener('input', () => { syncChips(); updatePreview(); if ($('#mpBox').open) renderExam(); }));
-['#optVoice', '#optDefer', '#optUrgent'].forEach(s => $(s).addEventListener('change', updatePreview));
-$('#optUrgent').addEventListener('change', () => { if ($('#optUrgent').checked) { $('#optDefer').checked = false; $('#optMute').checked = false; $('#optVoice').checked = true; } updatePreview(); });
-$('#optMute').addEventListener('change', () => { $('#optVoice').checked = !$('#optMute').checked; if ($('#optMute').checked) $('#optUrgent').checked = false; updatePreview(); });
+['#placeCustom', '#notice'].forEach(s => $(s).addEventListener('input', () => { syncChips(); updatePreview(); if ($('#mpBox').open) renderExam(); }));
+['#optSpeak', '#optDefer', '#optUrgent'].forEach(s => $(s).addEventListener('change', () => { renderTip(); updatePreview(); }));
+$('#optAt').addEventListener('change', () => setAt($('#optAt').checked));
+$('#optAtTime').addEventListener('change', () => { renderTip(); quickParse(); });
+$('#optUrgent').addEventListener('change', () => { if ($('#optUrgent').checked) $('#optDefer').checked = false; });
 $('#optDefer').addEventListener('change', () => { if ($('#optDefer').checked) $('#optUrgent').checked = false; updatePreview(); });
 $('#voiceSel').onchange = () => { store.set('cc_voice', $('#voiceSel').value); updatePreview(); };
 $('#tryVoice').onclick = async () => {
@@ -2111,7 +2221,7 @@ $('#savePhrase').onclick = async () => {
   const text = $('#notice').value.trim(); if (!text) return toast('先输入内容');
   try { renderPhrases((await api('/api/phrases/add', { text })).items); toast('已存为常用语 ✓'); } catch (e) { toast(e.message); }
 };
-$('#sendBtn').onclick = openConfirm;
+$('#sendBtn').onclick = () => send();
 $('#fontBtn').onclick = openFonts;
 $('#track').onclick = e => { if (e.target.id === 'trackX') { $('#track').classList.add('hidden'); return; } go('log'); };
 $('#meBtn').onclick = async () => {
@@ -2122,11 +2232,45 @@ $('#meBtn').onclick = async () => {
     : `<p class="me" style="display:block;text-align:center;white-space:normal;line-height:1.8">${roles}</p>
        <div style="margin-top:10px;font-weight:700">我的登录码</div><div class="me" style="display:block;text-align:center;white-space:normal;font-size:12.5px">换手机或用电脑时，扫这个码就能登录。<b>不要发给别人</b>。</div>
        <img src="/api/qr?t=${encodeURIComponent(r.login_url)}" style="width:180px;height:180px;margin:10px auto;display:block">
+       <a class="btn primary sm" style="--acc:#16a571;display:flex;justify-content:center;text-decoration:none;margin-bottom:8px" href="${esc(r.login_url.replace('/login?', '/app?'))}">📱 添加到手机桌面</a>
        <button class="btn soft sm" data-invcopy="${esc(r.login_url)}">复制登录链接</button>
        <div class="me" style="display:block;text-align:center;white-space:normal;font-size:12.5px;margin-top:8px">想在电脑上用：把链接发到微信"文件传输助手"，在电脑上点开就登录了</div>`;
   $('#meMask').classList.remove('hidden');
 };
 $('#meClose').onclick = () => $('#meMask').classList.add('hidden');
+// ---------- 看一眼大屏：一体机截一张图传上来（只给班主任、管理员；截图只在服务器内存里留 2 分钟） ----------
+S.shotRun = 0;
+async function takeShot() {
+  const run = ++S.shotRun, cls = S.cls, q = '?class=' + encodeURIComponent(cls);
+  const tip = t => { if (run === S.shotRun) $('#shotTip').textContent = t; };
+  let r; try { r = await api('/api/screen/shot', { class: cls }); } catch (e) { return tip(e.message); }
+  if (!r.online) return tip('大屏没连上（一体机可能关机了或没联网），截不了图');
+  tip('正在请一体机截图…');
+  const t0 = Date.now();
+  while (run === S.shotRun && Date.now() - t0 < 25000) {
+    await new Promise(ok => setTimeout(ok, 1200));
+    let st; try { st = await api('/api/screen/shot' + q); } catch { continue; }
+    if (!st.at || st.at < r.req) continue;  // 用服务器时间比，手机时间不准也没关系
+    if (st.err) return tip('一体机截图失败：' + st.err);
+    const res = await fetch('/api/screen/shot.img' + q, { headers: { Authorization: 'Bearer ' + token } });
+    if (!res.ok || run !== S.shotRun) continue;
+    const img = $('#shotImg'); if (img.src) URL.revokeObjectURL(img.src);
+    img.src = URL.createObjectURL(await res.blob()); img.style.display = 'block';
+    tip(`${new Date(st.at * 1000).toLocaleTimeString('zh-CN', { ...BJ, hour12: false })} 的画面 · 开着这个窗口每 5 秒刷新`);
+    setTimeout(() => { if (run === S.shotRun && !$('#shotMask').classList.contains('hidden') && Date.now() - S.shotOpen < 120000) takeShot(); }, 5000);
+    return;
+  }
+  tip('大屏没有回应：一体机的接收端可能还没更新（更新后 10 分钟内生效），稍后再试');
+}
+$('#shotBtn').onclick = () => { S.shotOpen = Date.now(); $('#shotImg').style.display = 'none'; $('#shotMask').classList.remove('hidden'); takeShot(); };
+$('#shotAgain').onclick = () => { S.shotOpen = Date.now(); takeShot(); };
+$('#shotClose').onclick = () => { S.shotRun++; $('#shotMask').classList.add('hidden'); };
+$('#meRename').onclick = async () => {
+  const name = (prompt('新的称呼（其他老师和大屏上看到的名字）', me) || '').trim();
+  if (!name || name === me) return;
+  try { const r = await api('/api/me/name', { name }); me = r.name; store.set('cc_name', me); $('#me').textContent = me; $('#meTitle').textContent = me; toast('称呼已改为：' + me); }
+  catch (e) { toast(e.message); }
+};
 $('#meLogout').onclick = () => { $('#meMask').classList.add('hidden'); $('#logoutBtn').click(); };
 $('#bkNow').onclick = async () => { try { const r = await api('/api/backup/now', {}); renderBackups(r.items); toast('已备份 ✓'); } catch (e) { toast(e.message); } };
 $('#clsClose').onclick = () => $('#classMask').classList.add('hidden');
@@ -2141,15 +2285,62 @@ $('#clsDrop').onclick = async () => {
   try { await api('/api/roster/delete', { class: n }); editClass(null); $('#classMask').classList.add('hidden'); S.clsEdit = null; await reloadClasses(); toast('已删除' + n); }
   catch (err) { toast(err.message); }
 };
+async function loadAdmins() {
+  $('#admCard').classList.toggle('hidden', !D.owner);
+  if (!D.owner) return;
+  try { renderAdmins(await api('/api/admins')); } catch {}
+}
+function renderAdmins(r) {
+  const tag = t => `${esc(t.name)} <span class="me">${esc(t.classes.join('、') || '没有加入班级')} · ${esc(t.created)} 加入</span>`;
+  $('#admList').innerHTML = r.teachers.filter(t => t.admin).map(t => `<div class="item" style="align-items:center">
+    <span class="kind" style="background:#e2f7ee;color:#128a5b">${ic('user')}</span><div class="main"><b>${tag(t)}</b></div>
+    <button class="btn ghost sm" data-admoff="${esc(t.uid)}">取消管理员</button></div>`).join('') || empty('只有你一个管理员');
+  const rest = r.teachers.filter(t => !t.admin);
+  $('#admPick').innerHTML = '<option value="">选择一位老师…</option>' + rest.map(t =>
+    `<option value="${esc(t.uid)}">${esc(t.name)}（${esc(t.classes.join('、'))}，${esc(t.created)} 加入）</option>`).join('');
+  $('#admDevN').textContent = `· ${r.devices.length} 台`;
+  $('#admDevices').innerHTML = r.devices.map(d => `<div class="item"><div class="main"><b>${esc(d.name)}</b>
+    <span class="me">${esc(d.time)} 登录${d.me ? ' · 就是你现在这台' : ''}</span></div></div>`).join('') || empty('没有');
+}
+$('#admAdd').onclick = async () => {
+  const uid = $('#admPick').value, o = $('#admPick').selectedOptions[0];
+  if (!uid) return toast('先选一位老师');
+  if (!confirm(`把「${o.textContent}」设为管理员？\n\n他能看到、管理全部班级（建班、改名单、给任何班发消息）。`)) return;
+  try { renderAdmins(await api('/api/admins/set', { uid, on: true })); toast('已设为管理员 ✓ 他刷新一下工作台就能看到全部班级'); } catch (e) { toast(e.message); }
+};
+$('#admList').addEventListener('click', async e => {
+  const b = e.target.closest('[data-admoff]'); if (!b) return;
+  try { renderAdmins(await api('/api/admins/set', { uid: b.dataset.admoff, on: false })); toast('已取消管理员'); } catch (err) { toast(err.message); }
+});
+$('#pwSave').onclick = async () => {
+  const old = $('#pwOld').value, nw = $('#pwNew').value;
+  if (!old || !nw) return toast('请填写原密码和新密码');
+  if (nw !== $('#pwNew2').value) return toast('两次输入的新密码不一样');
+  try {
+    const r = await api('/api/admin/password', { old, new: nw });
+    ['#pwOld', '#pwNew', '#pwNew2'].forEach(x => $(x).value = '');
+    renderAdmins(r); toast(`密码已修改 ✓ ${r.kicked ? `其他 ${r.kicked} 台设备已退出登录` : ''}`);
+  } catch (e) { toast(e.message); }
+};
 async function loadRegister() {
-  $('#regCard').classList.toggle('hidden', !(D.public && D.admin));
-  if (!(D.public && D.admin)) return;
+  $('#regCard').classList.toggle('hidden', !(D.public && D.owner));
+  if (!(D.public && D.owner)) return;
   let r; try { r = await api('/api/register/info'); } catch { return; }
   $('#regUrl').textContent = r.url;
   $('#regNow').textContent = r.code ? `· 现在是 ${r.code}` : '· 还没设置，网友暂时不能注册';
   $('#regCode').value = r.code;
   $('#regSub').textContent = `已注册 ${r.classes} 个班级、${r.teachers} 位老师`;
+  S.regPaused = !!r.paused;
+  $('#regPauseNow').textContent = r.paused ? '· 已暂停，网友现在不能注册' : '· 正常开放中';
+  $('#regPauseNow').style.color = r.paused ? '#d9480f' : '';
+  $('#regPause').textContent = r.paused ? '恢复注册' : '暂停注册';
+  $('#regPause').className = 'btn sm ' + (r.paused ? 'primary' : 'soft');
 }
+$('#regPause').onclick = async () => {
+  const p = !S.regPaused;
+  if (p && !confirm('暂停后网友就不能注册、也不能再建新班了（已经注册的老师不受影响）。确定暂停吗？')) return;
+  try { await api('/api/register/code', { paused: p }); toast(p ? '已暂停注册 ✓' : '已恢复注册 ✓'); loadRegister(); } catch (e) { toast(e.message); }
+};
 $('#regCopy').onclick = () => copyText($('#regUrl').textContent, '注册链接');
 $('#regSave').onclick = async () => {
   try { const r = await api('/api/register/code', { code: $('#regCode').value.trim() }); toast('注册码已改为 ' + r.code); loadRegister(); } catch (e) { toast(e.message); }
@@ -2170,6 +2361,7 @@ $('#clsSave').onclick = async () => {
     if (S.clsEdit) return toast('请填写学生名单');
     if (!confirm(`先建「${name}」，名单留空？\n建好后发班主任二维码，班主任加入后可以自己导入名单。`)) return;
   }
+  if (S.clsEdit && name !== S.clsEdit && !confirm(`把「${S.clsEdit}」改名为「${name}」？\n\n作业、考勤、积分等记录都会保留，一体机不用重新安装。`)) return;
   try { const r = await api('/api/roster/save', { class: name, old: S.clsEdit, names });
     S.clsEdit = r.class; await reloadClasses(r.class); editClass(r.class); toast(`已保存：${r.class}，${r.count} 人`); }
   catch (err) { toast(err.message); }
@@ -2187,8 +2379,11 @@ $('#clsCopy').onclick = async () => {
   copyText($('#clsCmd').textContent, '安装命令');
 };
 $('#fontDone').onclick = () => $('#fontMask').classList.add('hidden');
-$('#cfCancel').onclick = () => $('#confirmMask').classList.add('hidden');
-$('#cfOk').onclick = send;
+$('#examNew').onclick = () => openExamForm();
+$('#examCancel').onclick = closeExamForm;
+$('#examSave').onclick = saveExam;
+$('#examAddRow').onclick = () => { const rows = $$('#examRows .exrow'), last = rows[rows.length - 1];
+  $('#examRows').insertAdjacentHTML('beforeend', exRow({ date: last ? last.querySelector('[data-k=date]').value : bjToday() })); };
 $('#hwAdd').onclick = addHomework;
 $('#mrAdd').onclick = addMorning;
 $('#ntAdd').onclick = addNote;
@@ -2199,10 +2394,8 @@ $('#mrTimeSave').onclick = async () => {
 $('#hwPushAll').onclick = async () => {
   try { await api('/api/homework/push', { class: S.cls, ...voiceOpts() }); toast('已推送今日作业汇总 ✓'); refresh(); } catch (e) { toast(e.message); }
 };
-$('#remWork').onclick = () => { S.remDays = [1, 2, 3, 4, 5]; syncChips(); };
-$('#remAll').onclick = () => { S.remDays = [1, 2, 3, 4, 5, 6, 7]; syncChips(); };
-$('#remSave').onclick = () => saveReminder();
-$('#remCancel').onclick = () => editReminder(null);
+$('#remWork').onclick = () => { S.remDays = [1, 2, 3, 4, 5]; syncChips(); renderTip(); quickParse(); };
+$('#remAll').onclick = () => { S.remDays = [1, 2, 3, 4, 5, 6, 7]; syncChips(); renderTip(); quickParse(); };
 $('#tmStart').onclick = () => startTimer(+$('#tmMin').value);
 $('#tmStop').onclick = async () => {
   if (S.timer) { try { await api('/api/recall', { id: S.timer.id }); } catch {} }
@@ -2213,12 +2406,10 @@ $('#pApply').onclick = applyPoints;
 $('#pClear').onclick = () => { S.pSel.clear(); renderPoints(); };
 ['#pDelta', '#pReason'].forEach(x => $(x).addEventListener('input', renderPoints));
 $('#dutySave').onclick = saveDuty;
-$('#imgFile').onchange = e => { const f = e.target.files[0]; if (f) uploadImage(f); e.target.value = ''; };
-$('#imgPush').onclick = async () => {
-  try { await api('/api/image/push', { class: S.cls, img: S.img, caption: $('#imgCaption').value.trim(), seconds: S.imgSec });
-    toast(S.imgSec ? `已投到大屏，限时 ${S.imgSec / 60} 分钟 ✓` : '已投到大屏 ✓'); loadImages(); }
-  catch (e) { toast(e.message); }
-};
+$('#fileInput').onchange = e => { const f = e.target.files[0]; if (f) uploadFile(f); e.target.value = ''; };
+['dragenter', 'dragover'].forEach(t => $('#fileDrop').addEventListener(t, e => { e.preventDefault(); $('#fileDrop').style.borderColor = 'var(--acc,#16a571)'; }));
+$('#fileDrop').addEventListener('dragleave', () => { $('#fileDrop').style.borderColor = ''; });
+$('#fileDrop').addEventListener('drop', e => { e.preventDefault(); $('#fileDrop').style.borderColor = ''; const f = e.dataTransfer.files[0]; if (f) uploadFile(f); });
 $('#mpFile').onchange = e => { if (e.target.files.length) importExam(e.target.files); e.target.value = ''; };
 $('#mpBox').addEventListener('toggle', () => { if ($('#mpBox').open) loadExams(); });
 $('#mpFill').onclick = () => {
@@ -2238,20 +2429,27 @@ $('#dutyAuto').onclick = () => {
   renderDuty(); toast('已平均分好，记得点"保存值日表"');
 };
 $('#dutyPush').onclick = async () => { try { await api('/api/duty/push', { class: S.cls, ...voiceOpts() }); toast('已推送今日值日 ✓'); } catch (e) { toast(e.message); } };
-$('#remInsDuty').onclick = () => { const el = $('#remText'); el.value = (el.value + '{值日}').trim(); el.focus(); };
+async function saveCd() {  // 倒计时改完就保存（原来要拉到页面最底下点"保存"，老师常常找不到）
+  const l = readCd();
+  if (l.some(c => !c.name !== !c.date)) return;  // 名称和日期只填了一个：等填完再存
+  try { await api('/api/settings', { class: S.cls, countdowns: l }); toast('倒计时已保存 ✓'); } catch (e) { toast(e.message); }
+}
+$('#cdRows').addEventListener('change', () => { renderBoardPreview(); saveCd(); });
 $('#cdAdd').onclick = () => { const l = readCd(); if (l.length >= 4) return toast('最多 4 个'); l.push({ name: '', date: '' }); renderCd(l); };
-$('#bdNotice').oninput = renderBoardPreview;
 $('#bdSave').onclick = saveBoard;
-$('#ntSave').onclick = async () => {
-  try { await api('/api/settings', { class: S.cls, notice: $('#bdNotice').value.trim() }); toast($('#bdNotice').value.trim() ? '公告已保存，大屏一分钟内更新 ✓' : '公告已撤掉 ✓'); }
-  catch (e) { toast(e.message); }
-};
-$('#prSave').onclick = async () => {
+function prepBody() {  // 课前准备提醒的设置：「保存提醒设置」、页面底部「保存」、拨开关都用它
   const items = {};
   $('#prItems').value.split('\n').forEach(l => { const m = l.match(/^\s*([^：:]{1,6})\s*[：:]\s*(.+)$/); if (m) items[m[1].trim()] = m[2].trim(); });
-  try { await api('/api/settings', { class: S.cls, prep: { enabled: $('#prOn').checked, voice: $('#prVoice').checked, after: S.prLead, default: $('#prDefault').value.trim(), items } });
-    toast('课前准备提醒已保存 ✓'); } catch (e) { toast(e.message); }
+  return { enabled: $('#prOn').checked, voice: $('#prVoice').checked, after: S.prLead, default: $('#prDefault').value.trim(), items };
+}
+$('#prSave').onclick = async () => {
+  try { await api('/api/settings', { class: S.cls, prep: prepBody() }); toast('课前准备提醒已保存 ✓'); } catch (e) { toast(e.message); }
 };
+['#prOn', '#prVoice'].forEach(x => $(x).addEventListener('change', async () => {  // 开关一拨就保存，不用再找按钮
+  try { await api('/api/settings', { class: S.cls, prep: prepBody() });
+    toast(x === '#prOn' ? ($('#prOn').checked ? '已开启课前准备提醒 ✓' : '已关闭课前准备提醒 ✓') : ($('#prVoice').checked ? '课前提醒会语音播报 ✓' : '课前提醒不再语音播报 ✓')); }
+  catch (e) { toast(e.message); }
+}));
 $('#sjChips').onclick = e => {
   const b = e.target.closest('[data-sj]'); if (!b) return;
   const x = b.dataset.sj;

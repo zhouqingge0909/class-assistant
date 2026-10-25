@@ -17,11 +17,12 @@ echo "== 已连接 $HOST"
 echo "== 1/3 打包并检查（不含本校配置和名单）"
 PKG="$(mktemp -t class-call-public).tgz"
 trap 'rm -f "$PKG"' EXIT
-COPYFILE_DISABLE=1 tar -C "$DIR" --exclude ./config.json --exclude ./students.csv --exclude ./data --exclude ./dist \
-  --exclude ./windows --exclude ./声音试听 --exclude './*.md' --exclude ./fonts --exclude ./backups \
-  --exclude './deploy*.sh' --exclude ./pack.sh --exclude ./pull_backups.sh --exclude '.DS_Store' -czf "$PKG" .
-if tar -tzf "$PKG" | grep -qE '(^|/)(config\.json|students\.csv)$|(^|/)data/'; then
-  echo "   ❌ 包里有 config.json / students.csv / data，已停止，什么都没上传"; exit 1
+COPYFILE_DISABLE=1 tar -C "$DIR" --exclude './config.json*' --exclude './tts.json*' --exclude './students.csv*' --exclude '*.bak*' --exclude ./data --exclude ./lan --exclude ./dist \
+  --exclude ./windows --exclude ./声音试听 --exclude '*.md' --exclude '*.MD' --exclude '.claude' --exclude ./fonts --exclude ./backups \
+  --exclude './deploy*.sh' --exclude ./pack.sh --exclude ./kick-admins.sh --exclude ./set-tts-key.sh --exclude ./pull_backups.sh --exclude '.DS_Store' -czf "$PKG" .
+# 连 config.json.bak 这类备份、任何一层的 CLAUDE.md / *.md 说明文件和 .claude 设置也拦下
+if tar -tzf "$PKG" | grep -qiE '(^|/)(config\.json|tts\.json|students\.csv)|\.bak|(^|/)data/|\.md$|(^|/)\.claude(/|$)'; then
+  echo "   ❌ 包里有 config.json / students.csv / 备份文件 / data / 说明文档(.md)，已停止，什么都没上传"; exit 1
 fi
 echo "   ✅ 包里没有本校的密码和名单（$(tar -tzf "$PKG" | wc -l | tr -d ' ') 个文件）"
 "${SSH[@]}" "$HOST" 'mkdir -p /opt/class-call && tar --warning=no-unknown-keyword -C /opt/class-call -xzf -' < "$PKG"
@@ -68,6 +69,7 @@ User=classcall
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 Restart=always
 RestartSec=3
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target

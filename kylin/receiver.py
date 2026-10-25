@@ -19,7 +19,19 @@ import subprocess
 import sys
 import threading
 import time
-import tkinter as tk
+try:
+    import tkinter as tk
+except ImportError:  # 没有 sudo 密码装不了 python3-tk 时，install.sh 把它解压到 ~/.classcall/tk：带上路径重新启动自己
+    _tk = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tk")
+    if sys.platform == "win32" or not os.path.isdir(_tk) or os.environ.get("CLASSCALL_TK"):
+        raise
+    import glob
+    _py = os.path.join(_tk, "usr/lib/python%d.%d" % sys.version_info[:2])
+    _env = {"CLASSCALL_TK": "1", "PYTHONPATH": _py + ":" + _py + "/lib-dynload",
+            "LD_LIBRARY_PATH": ":".join(glob.glob(_tk + "/usr/lib/*-linux-gnu") + [_tk + "/usr/lib", os.environ.get("LD_LIBRARY_PATH", "")]),  # libBLT 在 usr/lib
+            "TCL_LIBRARY": _tk + "/usr/share/tcltk/tcl8.6", "TK_LIBRARY": _tk + "/usr/share/tcltk/tk8.6"}
+    os.environ.update(_env)
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 import urllib.parse
 import urllib.request
 from tkinter import font as tkfont
@@ -48,6 +60,7 @@ THEME = {  # 类型 -> (标题, 渐变起点, 渐变终点)
     "attend": ("考勤登记", "#3b9cf5", "#8b7cf6"),
     "image": ("题目投屏", "#6366f1", "#3b9cf5"),
     "prep": ("课前准备", "#16a571", "#14b8a6"),
+    "file": ("老师发来文件", "#0ea5e9", "#6366f1"),
 }
 NO_LINE_START = "，。、；：！？）》」』,.;:!?)"
 
@@ -78,9 +91,10 @@ SERVER = CFG["server"].rstrip("/")
 CLASS = CFG["class"]
 KEY = CFG["key"]
 Q_CLASS, Q_KEY = urllib.parse.quote(CLASS), urllib.parse.quote(KEY)
-POLL_URL = f"{SERVER}/api/poll?class={Q_CLASS}&key={Q_KEY}&rv=3"  # rv：认得远程卸载指令的版本
+POLL_URL = f"{SERVER}/api/poll?class={Q_CLASS}&key={Q_KEY}&rv=4"  # rv：3 起认得远程卸载指令，4 起会下载老师发来的文件
 BOARD_URL = f"{SERVER}/api/board?class={Q_CLASS}&key={Q_KEY}&fv=2"  # fv：认得中文字体名的新版
 ACK_URL = f"{SERVER}/api/ack?key={Q_KEY}"
+TOOL_URL = f"{SERVER}/api/screen/tool?key={Q_KEY}"  # 屏幕右边「工具」：在大屏上直接开计时、抽号
 COLLECT_URL = f"{SERVER}/collect?class={Q_CLASS}&key={Q_KEY}"
 ATTEND_URL = f"{SERVER}/attend?class={Q_CLASS}&key={Q_KEY}"
 SHOW_FLAG = os.path.join(HERE, "show-board")  # 桌面"班级看板"图标会创建这个文件
@@ -161,6 +175,62 @@ def send_ack(msg_id):
     threading.Thread(target=run, daemon=True).start()
 
 
+SHOT_PS = r"""Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+Add-Type 'using System.Runtime.InteropServices;public class Dpi{[DllImport("user32.dll")]public static extern bool SetProcessDPIAware();}'
+[Dpi]::SetProcessDPIAware() | Out-Null
+$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+[System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+$h = [int]($b.Height * 1280 / $b.Width)
+(New-Object System.Drawing.Bitmap $bmp, 1280, $h).Save('OUT', [System.Drawing.Imaging.ImageFormat]::Jpeg)"""
+
+
+def grab_screen(sw, sh):
+    """截一张屏幕图（老师在工作台点了"看一眼大屏"）：返回图片字节，截不了返回 None 和原因"""
+    out = os.path.join(HERE, "shot.jpg")
+    if WIN:
+        cmds = [["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", SHOT_PS.replace("OUT", out.replace("'", "''"))]]
+    else:  # 麒麟：系统里有哪个截图工具就用哪个
+        disp = os.environ.get("DISPLAY", ":0")
+        cmds = []
+        if shutil.which("ffmpeg"):
+            cmds.append(["ffmpeg", "-loglevel", "error", "-y", "-f", "x11grab", "-video_size", f"{sw}x{sh}", "-i", disp,
+                         "-frames:v", "1", "-vf", "scale=1280:-2", "-q:v", "6", out])
+        if shutil.which("import"):
+            cmds.append(["import", "-window", "root", "-resize", "1280x", "-quality", "70", out])
+        if shutil.which("scrot"):
+            cmds.append(["scrot", "-o", out])
+        if shutil.which("gnome-screenshot"):
+            cmds.append(["gnome-screenshot", "-f", out])
+        if not cmds:
+            return None, "这台一体机上没有截图工具（ffmpeg / import / scrot）"
+    err = ""
+    for c in cmds:
+        try:
+            if os.path.exists(out):
+                os.remove(out)
+            r = subprocess.run(c, capture_output=True, timeout=20, creationflags=0x08000000 if WIN else 0)
+            if os.path.exists(out) and os.path.getsize(out) > 0:
+                with open(out, "rb") as f:
+                    data = f.read()
+                os.remove(out)
+                return data, ""
+            err = (r.stderr or b"").decode("utf-8", "replace").strip()[-150:] or f"{c[0]} 没有生成图片"
+        except Exception as e:
+            err = f"{c[0]}：{e}"
+        log(f"截图失败：{err}")
+    return None, err or "截图失败"
+
+
+def send_shot(sw, sh):
+    data, err = grab_screen(sw, sh)
+    url = f"{SERVER}/api/screen/shot/upload?class={Q_CLASS}&key={Q_KEY}" + (f"&err={urllib.parse.quote(err)}" if err else "")
+    try:
+        urllib.request.urlopen(urllib.request.Request(url, data=data or b"", headers={"Content-Type": "application/octet-stream"}), timeout=30).read()
+    except Exception as e:
+        log(f"上传截图失败：{e}")
+
+
 def uninstall_self():
     """工作台点了"远程卸载"：取消开机自启、删掉桌面图标和程序文件夹，然后退出（和 uninstall.sh / uninstall.ps1 做的一样）"""
     log("收到远程卸载指令，开始卸载")
@@ -197,6 +267,94 @@ def open_url(url):
         subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     except Exception as e:
         log(f"打开网页失败：{e}")
+
+
+# ---------------- 老师发来的文件：存到桌面"班级文件"文件夹，7 天后自动删 ----------------
+FILE_INDEX = os.path.join(HERE, "files.json")  # 文件 id -> {path, at}：只删自己下载的，不碰老师自己放进去的东西
+file_lock = threading.Lock()
+
+
+def files_dir():
+    if WIN:
+        base = win_desktop()
+    else:
+        base = next((os.path.expanduser(d) for d in ("~/桌面", "~/Desktop") if os.path.isdir(os.path.expanduser(d))), HERE)
+    d = os.path.join(base, "班级文件")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def file_index():
+    try:
+        with open(FILE_INDEX, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_file_index(idx):
+    try:
+        with open(FILE_INDEX, "w", encoding="utf-8") as f:
+            json.dump(idx, f, ensure_ascii=False)
+    except OSError as e:
+        log(f"保存文件索引失败：{e}")
+
+
+def clean_files():
+    with file_lock:
+        idx = file_index()
+        old = [k for k, v in idx.items() if time.time() - v.get("at", 0) > 7 * 86400]
+        for k in old:
+            try:
+                os.remove(idx[k]["path"])
+            except OSError:
+                pass
+            idx.pop(k)
+        if old:
+            save_file_index(idx)
+            log(f"已删除 {len(old)} 个 7 天前的班级文件")
+
+
+def download_file(fid, name):
+    """下载到桌面"班级文件"，返回本地路径；已经下过就直接返回"""
+    with file_lock:
+        got = file_index().get(fid)
+    if got and os.path.isfile(got["path"]):
+        return got["path"]
+    folder = files_dir()
+    stem, ext = os.path.splitext(re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", name) or "文件")
+    path, n = os.path.join(folder, stem + ext), 2
+    while os.path.exists(path):  # 同名文件不覆盖，加 (2)(3)
+        path, n = os.path.join(folder, f"{stem}({n}){ext}"), n + 1
+    tmp = path + ".part"
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(f"{SERVER}/files/{fid}?key={Q_KEY}", timeout=60) as r, open(tmp, "wb") as f:
+                shutil.copyfileobj(r, f, 256 * 1024)
+            os.replace(tmp, path)
+            with file_lock:
+                idx = file_index()
+                idx[fid] = {"path": path, "at": time.time()}
+                save_file_index(idx)
+            log(f"已下载文件：{path}")
+            return path
+        except Exception as e:
+            log(f"下载文件失败（第 {attempt + 1} 次）：{e}")
+            time.sleep(5)
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+    return None
+
+
+def open_path(path):
+    try:
+        if WIN:
+            return os.startfile(path)
+        subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    except Exception as e:
+        log(f"打开文件失败：{e}")
 
 
 def ensure_desktop_icon():
@@ -301,6 +459,41 @@ class X11:
         self.xss.XScreenSaverQueryInfo(self.dpy, self.root, self.info)
         return self.info.contents.idle / 1000
 
+    def keep_awake(self):
+        """考试时每半分钟调用一次：不让系统屏保、黑屏、睡眠出来（假装有人轻轻动了一下鼠标，光标原地不动）"""
+        try:
+            if WIN:
+                ctypes.windll.kernel32.SetThreadExecutionState(0x80000003)  # ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED
+                ctypes.windll.user32.mouse_event(0x0001, 0, 0, 0, 0)  # 移动 0 像素：重置空闲计时，屏保不会启动
+                return
+            if not self.ok:
+                return
+            if not hasattr(self, "xtst"):
+                try:
+                    self.xtst = ctypes.cdll.LoadLibrary(ctypes.util.find_library("Xtst") or "libXtst.so.6")
+                    self.xtst.XTestFakeRelativeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
+                except OSError:
+                    self.xtst = None
+                self.x11.XResetScreenSaver.argtypes = [ctypes.c_void_p]
+                self.x11.XForceScreenSaver.argtypes = [ctypes.c_void_p, ctypes.c_int]
+                self.x11.XFlush.argtypes = [ctypes.c_void_p]
+            if self.xtst:  # 鼠标右移 1 像素再移回来：麒麟/统信的屏保按"多久没人操作"计时，这样就会重新计时
+                self.xtst.XTestFakeRelativeMotionEvent(self.dpy, 1, 0, 0)
+                self.xtst.XTestFakeRelativeMotionEvent(self.dpy, -1, 0, 0)
+            self.x11.XForceScreenSaver(self.dpy, 0)  # ScreenSaverReset：已经黑屏的话点亮屏幕，并重新计时
+            self.x11.XResetScreenSaver(self.dpy)
+            self.x11.XFlush(self.dpy)
+        except Exception as e:
+            log(f"阻止屏保失败：{e}")
+
+    def allow_sleep(self):
+        """考试结束：Windows 恢复正常的黑屏、睡眠"""
+        if WIN:
+            try:
+                ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
+            except Exception:
+                pass
+
 
 # ---------------- 绘图工具 ----------------
 def rgb(c):
@@ -367,6 +560,11 @@ def wrap_words(text, f, width):
                 cur = tok.lstrip()
         lines.append(cur)
     return lines
+
+
+def board_sig(board):
+    """看板上画死的内容（时钟、进度每秒自己更新，不算在内）"""
+    return json.dumps([board.get(k) for k in ("homework", "eve_plan", "notice", "notes", "countdowns", "duty", "stars", "evening")], sort_keys=True)
 
 
 def board_msgs(board):
@@ -452,20 +650,60 @@ class Card:
         self.cv.tag_bind(tag, "<Enter>", lambda e: self.cv.config(cursor="hand2"))
         return h
 
-    def text_block(self, text, top, bottom, biggest, color=INK, pad=None):
+    def text_block(self, text, top, bottom, biggest, color=INK, pad=None, smallest=14):
+        """字号从大往小试，放得下就画出来并返回 True；缩到 smallest 还放不下返回 False（调用方再截断或改成可拖动）"""
         pad = pad if pad is not None else int(self.w * 0.06)
         width, height = self.w - pad * 2, bottom - top
-        f, lines = None, []
-        for px in range(biggest, 13, -2):
+        for px in range(biggest, smallest - 1, -2):
             f = self.app.font(px, True)
             lines = wrap(text, f, width)
             if len(lines) * f.metrics("linespace") * 1.12 <= height:
                 break
+        else:
+            if smallest > 14:
+                return False
         lh = f.metrics("linespace") * 1.12
         y = top + (height - lh * len(lines)) / 2 + lh / 2
+        left = len(lines) > 3  # 多行的作业左对齐，读起来顺
         for line in lines:
-            self.cv.create_text(self.w / 2, y, text=line, fill=color, font=f)
+            self.cv.create_text(pad if left else self.w / 2, y, text=line, anchor="w" if left else "center", fill=color, font=f)
             y += lh
+        return True
+
+    def clipped_text(self, text, top, bottom, px, color=INK, pad=None):
+        """右下角小卡片放不下：能放几行放几行，最后一行末尾加"…" """
+        pad = pad if pad is not None else int(self.w * 0.06)
+        f = self.app.font(px, True)
+        lh = f.metrics("linespace") * 1.12
+        lines = wrap(text, f, self.w - pad * 2)
+        n = max(1, int((bottom - top) // lh))
+        lines = lines[:n - 1] + [ellipsis(lines[n - 1] + "……", f, self.w - pad * 2)]
+        y = top + (bottom - top - lh * len(lines)) / 2 + lh / 2
+        for line in lines:
+            self.cv.create_text(pad, y, text=line, anchor="w", fill=color, font=f)
+            y += lh
+
+    def scroll_text(self, text, top, bottom, px, color=INK, pad=None):
+        """大窗也放不下：用 px 号字左对齐排好，放进可以用手指上下拖动（或滚轮）的区域"""
+        pad = pad if pad is not None else int(self.w * 0.06)
+        f = self.app.font(px, True)
+        lh = f.metrics("linespace") * 1.12
+        hint = self.app.font(max(16, int(px * 0.7)), True)
+        hint_h = hint.metrics("linespace") * 1.6
+        width, height = int(self.w - pad * 2), int(bottom - top - hint_h)
+        inner = tk.Canvas(self.win, width=width, height=height, bg="#ffffff", highlightthickness=0)
+        self.cv.create_window(pad, top, window=inner, anchor="nw")
+        y = lh / 2
+        for line in wrap(text, f, width):
+            inner.create_text(0, y, text=line, anchor="w", fill=color, font=f)
+            y += lh
+        inner.configure(scrollregion=(0, 0, width, int(y)), yscrollincrement=1)
+        inner.bind("<ButtonPress-1>", lambda e: inner.scan_mark(0, e.y))
+        inner.bind("<B1-Motion>", lambda e: inner.scan_dragto(0, e.y, gain=1))
+        inner.bind("<MouseWheel>", lambda e: inner.yview_scroll(-int(e.delta / 120) * int(lh), "units"))  # Windows
+        inner.bind("<Button-4>", lambda e: inner.yview_scroll(-int(lh), "units"))  # 麒麟滚轮
+        inner.bind("<Button-5>", lambda e: inner.yview_scroll(int(lh), "units"))
+        self.cv.create_text(self.w / 2, bottom - hint_h / 2, text="内容较多，用手指按住文字上下拖动查看全部", fill=MUTED, font=hint)
 
     def place(self, slot):
         if not self.popup:
@@ -474,9 +712,12 @@ class Card:
 
     def lift(self):
         for w in (self.backdrop, self.win):
-            if w:
-                w.attributes("-topmost", True)
-                w.lift()
+            try:
+                if w:
+                    w.attributes("-topmost", True)
+                    w.lift()
+            except tk.TclError:  # 窗口被别的程序关掉了
+                pass
 
     def close(self):
         for w in (self.win, self.backdrop):
@@ -489,13 +730,28 @@ class Card:
 
 class MessageCard(Card):
     def __init__(self, app, m):
-        super().__init__(app, m.get("kind", "call"), f"{m['sender']} · {m['time']}", bool(m.get("popup")))
-        btn_px = int(self.h * 0.055) if self.popup else 17
+        popup = bool(m.get("popup"))
+        long = popup and len(m["text"]) > 60  # 长作业：大窗开得更大
+        super().__init__(app, m.get("kind", "call"), f"{m['sender']} · {m['time']}", popup,
+                         (int(app.sw * 0.84), int(app.sh * 0.86)) if long else None)
+        btn_px = int(app.sh * 0.62 * 0.055) if self.popup else 17
         btn_y = self.h - btn_px * 2.2
         self.button(self.w / 2 if self.popup else self.w - btn_px * 3.4, btn_y, "收到", lambda: app.confirm(m["id"]), btn_px)
         bottom = btn_y - btn_px * 1.6 if self.popup else self.h - btn_px * 4.2
         big = 0.11 if m.get("kind") == "prep" else 0.16  # 课前提醒两行字，稍小一点免得一个词被拆开
-        self.text_block(m["text"], self.band + 10, bottom, int(self.h * big) if self.popup else 34)
+        if self.popup:
+            least = max(20, int(app.sh * 0.032))  # 大窗字号最小到这里（教室后排还看得清），再放不下就改成可拖动
+            if not self.text_block(m["text"], self.band + 10, bottom, int(app.sh * 0.62 * big), smallest=least):
+                self.scroll_text(m["text"], self.band + 16, bottom, least)
+        elif not self.text_block(m["text"], self.band + 6, bottom, 34, smallest=20):
+            self.clipped_text(m["text"], self.band + 6, bottom, 20)
+            self.button(self.w - btn_px * 9.4, btn_y, "看全文", lambda: self.expand(app, m), btn_px, color="#3b82f6")
+
+    def expand(self, app, m):
+        """右下角小卡片点"看全文"：换成大窗（不再播报）"""
+        app.close(m["id"])
+        app.cards[m["id"]] = MessageCard(app, dict(m, popup=True, voice=False))
+        app.relayout()
 
 
 class CollectCard(Card):
@@ -575,6 +831,59 @@ class ImageCard(Card):
         mm, ss = divmod(int(left + 0.999), 60)
         self.cv.itemconfig(self.clock, text=f"限时订正 {mm:02d}:{ss:02d}")
         self.win.after(250, self.tick)
+
+
+class FileCard(Card):
+    """老师发来的文档：先下载到桌面"班级文件"，点"打开"用一体机自带的软件（WPS/Office）打开"""
+
+    def __init__(self, app, m):
+        d = m.get("data") or {}
+        popup = bool(m.get("popup"))
+        super().__init__(app, "file", f"{m['sender']} · {m['time']}", popup,
+                         (int(app.sw * 0.5), int(app.sh * 0.42)) if popup else None)
+        self.mid, self.path, self.want_open, self.failed = m["id"], None, False, False
+        px = int(self.h * 0.06) if popup else 16
+        y = self.h - px * 2.2
+        if popup:
+            self.button(self.w / 2 - px * 4, y, "打开", self.open, px)
+            self.button(self.w / 2 + px * 4, y, "关闭", lambda: app.confirm(self.mid), px, color="#9aa6b5")
+        else:
+            self.button(self.w - px * 9, y, "打开", self.open, px)
+            self.button(self.w - px * 3.4, y, "关闭", lambda: app.confirm(self.mid), px, color="#9aa6b5")
+        name, size = d.get("name", "文件"), d.get("size", "")
+        top, bottom = self.band + 8, y - px * 1.6
+        if popup:
+            self.text_block(name, top, top + (bottom - top) * 0.7, int(self.h * 0.09))
+            sy = top + (bottom - top) * 0.85
+            self.status = self.cv.create_text(self.w / 2, sy, text=f"{size}　下载中…", fill=MUTED, font=app.font(int(self.h * 0.045)))
+        else:
+            pad = 20
+            self.cv.create_text(pad, self.band + 30, text=ellipsis(name, app.font(22, True), self.w - pad * 2), anchor="w",
+                                fill=INK, font=app.font(22, True))
+            self.status = self.cv.create_text(pad, self.band + 64, text=f"{size}　下载中…", anchor="w", fill=MUTED, font=app.font(15))
+        self.size = size
+        threading.Thread(target=self.fetch, args=(d.get("file", ""), name), daemon=True).start()
+
+    def fetch(self, fid, name):
+        path = download_file(fid, name)
+        self.app.root.after(0, lambda: self.done(path))
+
+    def done(self, path):
+        self.path, self.failed = path, not path
+        try:
+            self.cv.itemconfig(self.status, text=f"{self.size}　已存到桌面「班级文件」" if path else "下载失败，请检查网络后让老师重发")
+        except tk.TclError:
+            return
+        if path and self.want_open:
+            self.open()
+
+    def open(self):
+        if self.path:
+            open_path(self.path)
+            self.app.confirm(self.mid)
+        elif not self.failed:
+            self.want_open = True
+            self.cv.itemconfig(self.status, text=f"{self.size}　还在下载，下好自动打开…")
 
 
 class TimerCard(Card):
@@ -681,21 +990,54 @@ class Standby:
 
         L, R = sw * 0.055, sw * 0.945
         mid = sw * 0.47
+        self.L_, self.mid_ = L, mid
         # ---- 左栏：状态、时钟、本节进度、倒计时、值日 ----
         self.pill_bg = round_rect(cv, L, 6 * u, L + 22 * u, 11 * u, 2.5 * u, fill="#123b34", width=0)
         self.pill = cv.create_text(L + 11 * u, 8.5 * u, text="", fill=self.GREEN, font=F(2.4))
         self.clock = cv.create_text(L - 0.6 * u, 22 * u, text="", anchor="w", fill="#ffffff", font=app.font(int(17 * u), True, digits=True))
         self.date = cv.create_text(L, 34.5 * u, text="", anchor="w", fill=self.DIM, font=F(2.6))
-        py = 40 * u  # 本节进度卡
-        round_rect(cv, L, py, mid - 2 * u, py + 15 * u, 2.6 * u, fill=self.PANEL, width=0)
-        self.sess = cv.create_text(L + 2.6 * u, py + 4 * u, text="", anchor="w", fill=self.SOFT, font=F(2.6))
-        self.left = cv.create_text(mid - 4.6 * u, py + 4 * u, text="", anchor="e", fill="#ffffff", font=F(3.2))
-        self.bar_box = (L + 2.6 * u, py + 9.5 * u, mid - 4.6 * u, py + 11.3 * u)
-        round_rect(cv, *self.bar_box, 0.9 * u, fill="#2a4073", width=0)
-        self.bar = None
-        y = py + 19 * u
-        cds = board.get("countdowns") or []
-        if cds:
+        py = 40 * u
+        plan, cds = board.get("eve_plan") or [], board.get("countdowns") or []
+        self.bar, self.rows = None, []
+        if plan:  # 班主任排了晚自习时间安排：本节进度卡换成"今晚安排"，正在进行的一段高亮、带进度条
+            room = sh - (15 if board.get("quote") else 8) * u - py - (8 * u if cds else 0) - 7 * u
+            rh = max(4.4 * u, min(6.4 * u, room / len(plan)))
+            round_rect(cv, L, py, mid - 2 * u, py + 6 * u + rh * len(plan), 2.6 * u, fill=self.PANEL, width=0)
+            cv.create_text(L + 2.6 * u, py + 3.4 * u, text="今晚安排", anchor="w", fill=self.DIM, font=F(2.2))
+            f_t, f_s = app.font(int(2.6 * u), True, digits=True), F(2.8)
+            sx = L + 2.6 * u + f_t.measure("00:00–00:00") + 2.4 * u  # 科目紧跟在时间后面，按实际字宽排
+            for k, it in enumerate(plan):
+                y1 = py + 5.4 * u + k * rh
+                c = next((v for s, v in SUBJ_COLOR.items() if it["text"].startswith(s)), None)
+                self.rows.append({"a": it["start"], "e": it["end"], "y": (y1, y1 + rh - 0.5 * u),
+                                  "color": mix(c, "#ffffff", 0.3) if c else self.SOFT,
+                                  "hl": round_rect(cv, L + 1.2 * u, y1, mid - 3.2 * u, y1 + rh - 0.5 * u, 1.6 * u, fill=self.PANEL, width=0),
+                                  "t": cv.create_text(L + 2.6 * u, y1 + rh / 2 - 0.25 * u, text=f"{it['start']}–{it['end']}", anchor="w", fill=self.DIM, font=f_t),
+                                  "s": cv.create_text(sx, y1 + rh / 2 - 0.25 * u, anchor="w", font=f_s,
+                                                      text=ellipsis(it["text"], f_s, mid - 18 * u - sx)),
+                                  "r": cv.create_text(mid - 4.6 * u, y1 + rh / 2 - 0.25 * u, text="", anchor="e", fill=self.GREEN, font=F(2.2))})
+            y = py + 6 * u + rh * len(plan) + 2 * u
+        else:  # 本节进度卡
+            round_rect(cv, L, py, mid - 2 * u, py + 15 * u, 2.6 * u, fill=self.PANEL, width=0)
+            self.sess = cv.create_text(L + 2.6 * u, py + 4 * u, text="", anchor="w", fill=self.SOFT, font=F(2.6))
+            self.left = cv.create_text(mid - 4.6 * u, py + 4 * u, text="", anchor="e", fill="#ffffff", font=F(3.2))
+            self.bar_box = (L + 2.6 * u, py + 9.5 * u, mid - 4.6 * u, py + 11.3 * u)
+            round_rect(cv, *self.bar_box, 0.9 * u, fill="#2a4073", width=0)
+            y = py + 19 * u
+        if cds and plan:  # 有时间安排时倒计时缩成一行
+            x = L
+            for c in cds[:3]:
+                f_n = app.font(int(3.4 * u), True, digits=True)
+                w = F(2.2).measure(f"距{c['name']}天") + f_n.measure(str(c["days"])) + 5 * u
+                if x + w > mid - 2 * u:
+                    break
+                round_rect(cv, x, y, x + w, y + 6 * u, 2 * u, fill=self.PANEL, width=0)
+                t = cv.create_text(x + 1.8 * u, y + 3 * u, text=f"距{c['name']}", anchor="w", fill=self.DIM, font=F(2.2))
+                n = cv.create_text(cv.bbox(t)[2] + 0.8 * u, y + 3 * u, text=str(c["days"]), anchor="w", fill=self.GOLD, font=f_n)
+                cv.create_text(cv.bbox(n)[2] + 0.6 * u, y + 3.3 * u, text="天", anchor="w", fill=self.DIM, font=F(2.2))
+                x += w + 1.4 * u
+            y += 9 * u
+        elif cds:
             n = min(3, len(cds)); gap = 1.6 * u; w = (mid - 2 * u - L - gap * (n - 1)) / n
             for k, c in enumerate(cds[:3]):
                 x1 = L + k * (w + gap)
@@ -801,7 +1143,7 @@ class Standby:
         now = time.time() + self.app.offset
         t = time.gmtime(now + 8 * 3600)  # 北京时间
         cv.itemconfig(self.clock, text=time.strftime("%H:%M", t))
-        cv.itemconfig(self.date, text=f"{t.tm_mon}月{t.tm_mday}日　星期{'一二三四五六日'[t.tm_wday]}　·　{CLASS}")
+        cv.itemconfig(self.date, text=f"{t.tm_mon}月{t.tm_mday}日　星期{'一二三四五六日'[t.tm_wday]}　·　{self.app.board.get('class') or CLASS}")
         b = self.app.board or self.board
         sess, p = b.get("session"), b.get("period") or {}
         hm = t.tm_hour * 60 + t.tm_min + t.tm_sec / 60
@@ -820,15 +1162,31 @@ class Standby:
         else:
             title, left, frac, pill = "课间", None, None, "课间"
         cv.itemconfig(self.pill, text=pill)
-        cv.itemconfig(self.sess, text=title)
         cv.itemconfig(self.foot, text=("请保持安静　·　" if pill == "上课中" else "自习中，请保持安静　·　") + "轻触屏幕返回")
-        cv.itemconfig(self.left, text=f"还剩 {int(left + 0.999)} 分钟" if left is not None else "")
         if self.bar:
             cv.delete(self.bar)
             self.bar = None
-        x1, y1, x2, y2 = self.bar_box
-        if frac is not None and frac > 0.01:
-            self.bar = round_rect(cv, x1, y1, x1 + (x2 - x1) * frac, y2, 0.9 * u, fill=self.GREEN, width=0)
+        if self.rows:
+            nxt = next((r for r in self.rows if hm < mins(r["a"])), None)
+            for r in self.rows:
+                a, e = mins(r["a"]), mins(r["e"])
+                now, done = a <= hm < e, hm >= e
+                cv.itemconfig(r["hl"], fill="#24406f" if now else self.PANEL)
+                cv.itemconfig(r["t"], fill="#ffffff" if now else mix(self.DIM, self.PANEL, 0.55) if done else self.DIM)
+                cv.itemconfig(r["s"], fill=mix(r["color"], self.PANEL, 0.55) if done else r["color"])
+                soon = r is nxt and not any(mins(x["a"]) <= hm < mins(x["e"]) for x in self.rows) and a - hm <= 30
+                cv.itemconfig(r["r"], text=f"还剩 {int(e - hm + 0.999)} 分钟" if now else f"{int(a - hm + 0.999)} 分钟后开始" if soon else "")
+                if now:  # 这一段的进度条，贴在高亮行底部
+                    y1, y2 = r["y"]
+                    x1, x2 = self.L_ + 2.6 * u, self.mid_ - 4.6 * u
+                    w = (x2 - x1) * min(1, max(0, (hm - a) / max(1, e - a)))
+                    self.bar = round_rect(cv, x1, y2 - 1.1 * u, x1 + max(w, 1.2 * u), y2 - 0.4 * u, 0.35 * u, fill=self.GREEN, width=0)
+        else:
+            cv.itemconfig(self.sess, text=title)
+            cv.itemconfig(self.left, text=f"还剩 {int(left + 0.999)} 分钟" if left is not None else "")
+            x1, y1, x2, y2 = self.bar_box
+            if frac is not None and frac > 0.01:
+                self.bar = round_rect(cv, x1, y1, x1 + (x2 - x1) * frac, y2, 0.9 * u, fill=self.GREEN, width=0)
         self.win.after(1000, self.tick)
 
     def close(self):
@@ -956,7 +1314,7 @@ class DayStandby:
         t = time.gmtime(now + 8 * 3600)
         hm = time.strftime("%H:%M", t)
         cv.itemconfig(self.clock, text=hm)
-        cv.itemconfig(self.date, text=f"{t.tm_mon}月{t.tm_mday}日　星期{'一二三四五六日'[t.tm_wday]}　·　{CLASS}")
+        cv.itemconfig(self.date, text=f"{t.tm_mon}月{t.tm_mday}日　星期{'一二三四五六日'[t.tm_wday]}　·　{self.app.board.get('class') or CLASS}")
         b = self.app.board or self.board
         classes, cur, nxt = b.get("classes_today") or [], None, None
         cur = next((c for c in classes if c["start"] <= hm < c["end"]), None)
@@ -1072,7 +1430,7 @@ class MorningBoard:
         now = time.time() + self.app.offset
         t = time.gmtime(now + 8 * 3600)
         cv.itemconfig(self.clock, text=time.strftime("%H:%M", t))
-        cv.itemconfig(self.date, text=f"{t.tm_mon}月{t.tm_mday}日　星期{'一二三四五六日'[t.tm_wday]}　·　{CLASS}")
+        cv.itemconfig(self.date, text=f"{t.tm_mon}月{t.tm_mday}日　星期{'一二三四五六日'[t.tm_wday]}　·　{self.app.board.get('class') or CLASS}")
         mins = lambda s_: int(s_[:2]) * 60 + int(s_[3:5])
         try:
             a, b = mins(self.mo["start"]), mins(self.mo["end"])
@@ -1096,7 +1454,329 @@ class MorningBoard:
             pass
 
 
+def exam_key(ex):
+    return (ex["key"], ex["start_ts"], ex["end_ts"], ex["subject"], ex["name"], tuple(ex.get("notice") or []), str(ex.get("next")))
+
+
+EXAM_SAY = {"start": "考试开始，请开始答题", "warn": "距离考试结束还有十五分钟", "end": "考试结束，请停止作答"}
+
+
+class ExamBoard:
+    """考试大屏（整屏，深蓝）：开考前显示须知和开考倒计时，考试中显示科目和结束倒计时，结束后提示停笔。
+    碰一下屏幕右下角出现"收起考试大屏"按钮（误碰不会收起），收起后右下角留一个小条，点它回到考试大屏；
+    开考、剩 15 分钟、结束时自动回到大屏并各播报一次。到点自动关闭，或老师在工作台点"提前结束"。"""
+    BG, PANEL, LINE_, INK_, SOFT, BLUE, GOLD, RED = "#0f1e2e", "#172c42", "#24425f", "#eaf2fb", "#9fb6cc", "#7cc4ff", "#ffd166", "#ff6b6b"
+
+    def __init__(self, app, ex):
+        self.app, self.ex, self.phase = app, ex, None
+        self.hidden, self.mini, self.hide_btn = False, None, None
+        self.key = exam_key(ex)
+        sw, sh = app.sw, app.sh
+        self.win = tk.Toplevel(app.root)
+        self.win.overrideredirect(True)
+        self.win.attributes("-topmost", True)
+        self.win.geometry(f"{sw}x{sh}+0+0")
+        float_window(self.win)
+        self.cv = tk.Canvas(self.win, width=sw, height=sh, highlightthickness=0, bg=self.BG)
+        self.cv.pack()
+        self.u = sh / 100
+        self.L, self.R = sw * 0.045, sw * 0.955
+        self.cv.bind("<Button-1>", self.on_touch)
+        self.tick()
+
+    def on_touch(self, e):
+        if "hidebtn" in self.cv.gettags("current"):
+            return  # 点的就是按钮：交给按钮自己处理
+        if self.hide_btn:
+            self.cv.after_cancel(self.hide_btn)
+        else:
+            cv, u, f = self.cv, self.u, self.F(2.8)
+            w, h = f.measure("收起考试大屏") + 5 * u, 5 * u
+            x2, y2 = self.R, self.app.sh - 1.2 * u
+            round_rect(cv, x2 - w, y2 - h, x2, y2, h / 2, fill="#2b5a85", outline=self.BLUE, width=2, tags="hidebtn")
+            cv.create_text(x2 - w / 2, y2 - h / 2, text="收起考试大屏", fill="#ffffff", font=f, tags="hidebtn")
+            cv.tag_bind("hidebtn", "<Button-1>", lambda ev: self.collapse())
+        self.hide_btn = self.cv.after(6000, self.remove_hide_btn)  # 6 秒不点就消失
+
+    def remove_hide_btn(self):
+        if self.hide_btn:
+            self.cv.after_cancel(self.hide_btn)
+            self.hide_btn = None
+        self.cv.delete("hidebtn")
+
+    def collapse(self):
+        """收起：整屏藏起来，右下角留一个小条（显示倒计时，点它回到考试大屏）"""
+        self.remove_hide_btn()
+        self.hidden = True
+        self.win.withdraw()
+        app, sw, sh = self.app, self.app.sw, self.app.sh
+        w, h = int(min(620, sw * 0.36)), int(max(70, sh * 0.085))
+        self.mini = tk.Toplevel(app.root)
+        self.mini.overrideredirect(True)
+        self.mini.attributes("-topmost", True)
+        self.mini.geometry(f"{w}x{h}+{sw - w - 24}+{sh - h - 70}")
+        float_window(self.mini)
+        cv = self.mini_cv = tk.Canvas(self.mini, width=w, height=h, bg=self.BG, highlightthickness=0)
+        cv.pack()
+        cv.create_rectangle(0, 0, w - 1, h - 1, outline=self.BLUE, width=2)
+        cv.create_rectangle(0, 0, int(h * 0.09), h, fill=self.GOLD, width=0)
+        px = int(h * 0.3)
+        title = self.ex["subject"] + (" · 考试中" if self.phase == "during" else "")
+        cv.create_text(h * 0.3, h * 0.34, text=ellipsis(title, app.font(px, True), w * 0.5), anchor="w", fill=self.INK_, font=app.font(px, True))
+        cv.create_text(h * 0.3, h * 0.74, text="点这里回到考试大屏", anchor="w", fill=self.SOFT, font=app.font(int(px * 0.72)))
+        self.mini_count = cv.create_text(w - h * 0.25, h / 2, text="", anchor="e", fill=self.GOLD, font=app.font(int(px * 1.25), True, digits=True))
+        cv.bind("<Button-1>", lambda e: self.expand())
+        log("考试大屏已收起到右下角")
+
+    def expand(self):
+        if not self.hidden:
+            return
+        self.hidden = False
+        if self.mini:
+            self.mini.destroy()
+            self.mini = None
+        self.win.deiconify()
+        self.win.geometry(f"{self.app.sw}x{self.app.sh}+0+0")
+        self.win.attributes("-topmost", True)
+        self.win.lift()
+        float_window(self.win)
+        for card in self.app.cards.values():  # 紧急消息照常在最前面
+            card.lift()
+        log("回到考试大屏")
+
+    def F(self, size, bold=True, digits=False):
+        return self.app.font(int(size * self.u), bold, digits=digits)
+
+    def phase_of(self, now):
+        ex = self.ex
+        return "before" if now < ex["start_ts"] else "during" if now < ex["end_ts"] else "after"
+
+    def head(self):
+        cv, u, ex = self.cv, self.u, self.ex
+        title = f"{ex['name']} · 第 {ex['no']} 场" if ex.get("total", 1) > 1 else ex["name"]
+        cv.create_text(self.L, 7 * u, text=title, anchor="w", fill=self.SOFT, font=self.F(3.2))
+        self.clock = cv.create_text(self.R, 7 * u, text="", anchor="e", fill=self.INK_, font=self.F(4.4, digits=True))
+        cv.create_text(self.R - self.F(4.4, digits=True).measure("00:00") - 1.2 * u, 7.4 * u, text="现在", anchor="e", fill=self.SOFT, font=self.F(2.8, False))
+
+    def next_text(self):
+        nx = self.ex.get("next")
+        if not nx:
+            return None
+        day = "" if nx["date"] == self.ex["date"] else f"{int(nx['date'][5:7])}月{int(nx['date'][8:10])}日 "
+        return nx["subject"], f"{day}{nx['start']} – {nx['end']}"
+
+    def box(self, x1, y1, x2, y2, r=None):
+        round_rect(self.cv, x1, y1, x2, y2, r or 3 * self.u, fill=self.PANEL, outline=self.LINE_, width=2)
+
+    def draw(self, phase):
+        cv, u, ex, L, R = self.cv, self.u, self.ex, self.L, self.R
+        cv.delete("all")
+        self.phase, self.bar_fill = phase, None
+        if self.hide_btn:
+            cv.after_cancel(self.hide_btn)
+            self.hide_btn = None
+        self.head()
+        mins = int(round((ex["end_ts"] - ex["start_ts"]) / 60))
+        if phase == "before":  # 须知 + 开考倒计时
+            cv.create_text(L, 21 * u, text=ex["subject"], anchor="w", fill=self.INK_, font=self.F(10))
+            sx = L + self.F(10).measure(ex["subject"]) + 3 * u
+            cv.create_text(sx, 22.5 * u, text=f"{ex['start']} – {ex['end']}", anchor="w", fill="#cfe0f0", font=self.F(5, False, True))
+            bx1 = R - 58 * u
+            self.box(bx1, 13 * u, R, 37 * u)
+            cv.create_text((bx1 + R) / 2, 18 * u, text="距离开考", fill=self.SOFT, font=self.F(3.4))
+            self.count = cv.create_text((bx1 + R) / 2, 28.5 * u, text="", fill=self.BLUE, font=self.F(12, True, True))
+            self.box(L, 43 * u, R, 94 * u)
+            cv.create_text(L + 4.5 * u, 50 * u, text="考场须知", anchor="w", fill=self.GOLD, font=self.F(4))
+            lines = (ex.get("notice") or [])[:6]
+            size = 4 if len(lines) <= 4 else 3.4
+            for k, ln in enumerate(lines):
+                cv.create_text(L + 5 * u, 58 * u + k * size * 1.75 * u, text="·  " + ellipsis(ln, self.F(size, False), R - L - 12 * u),
+                               anchor="w", fill=self.INK_, font=self.F(size, False))
+        elif phase == "during":  # 科目 + 结束倒计时 + 进度条
+            cv.create_text(L, 26 * u, text=ex["subject"], anchor="w", fill=self.INK_, font=self.F(19))
+            cv.create_text(L + 0.6 * u, 43 * u, text=f"{ex['start']} – {ex['end']}", anchor="w", fill="#cfe0f0", font=self.F(5.6, False, True))
+            tw = self.F(5.6, False, True).measure(f"{ex['start']} – {ex['end']}")
+            cv.create_text(L + tw + 2.4 * u, 43.6 * u, text=f"共 {mins} 分钟", anchor="w", fill=self.SOFT, font=self.F(3.4, False))
+            bx1 = R - 66 * u
+            self.box(bx1, 13 * u, R, 50 * u)
+            cv.create_text((bx1 + R) / 2, 19 * u, text="距离考试结束", fill=self.SOFT, font=self.F(3.6))
+            self.count = cv.create_text((bx1 + R) / 2, 31 * u, text="", fill=self.GOLD, font=self.F(16, True, True))
+            self.status = cv.create_text((bx1 + R) / 2, 44 * u, text="", fill=self.GOLD, font=self.F(3.2))
+            self.bar = (L, 57 * u, R, 59 * u)
+            round_rect(cv, *self.bar, 1 * u, fill="#1d3550", width=0)
+            lines = (ex.get("notice") or [])[:3]
+            if lines:
+                cv.create_text(L, 66 * u, text="考场提醒", anchor="w", fill=self.SOFT, font=self.F(3.2))
+                for k, ln in enumerate(lines):
+                    cv.create_text(L + 1 * u, 73 * u + k * 6.2 * u, text="·  " + ellipsis(ln, self.F(3.6, False), R - L - 62 * u),
+                                   anchor="w", fill=self.INK_, font=self.F(3.6, False))
+            nt = self.next_text()
+            if nt:
+                nx1 = R - 54 * u
+                self.box(nx1, 64 * u, R, 92 * u)
+                cv.create_text(nx1 + 3.4 * u, 70 * u, text="下一场", anchor="w", fill=self.SOFT, font=self.F(3))
+                cv.create_text(nx1 + 3.4 * u, 78 * u, text=nt[0], anchor="w", fill=self.INK_, font=self.F(4.8))
+                cv.create_text(nx1 + 3.4 * u, 86 * u, text=nt[1], anchor="w", fill="#cfe0f0", font=self.F(3.4, False, True))
+        else:  # 结束：停笔
+            cx = self.app.sw / 2
+            cv.create_text(cx, 38 * u, text="考试结束", fill=self.INK_, font=self.F(15))
+            cv.create_text(cx, 54 * u, text="请停止作答，等待监考老师收卷", fill=self.GOLD, font=self.F(5))
+            nt = self.next_text()
+            if nt:
+                cv.create_text(cx, 70 * u, text=f"下一场　{nt[0]}　{nt[1]}", fill=self.SOFT, font=self.F(4, False))
+
+    def tick(self):
+        if not self.win.winfo_exists():
+            return
+        now = time.time() + self.app.offset
+        ex, u = self.ex, self.u
+        phase = self.phase_of(now)
+        if phase != self.phase:
+            if self.phase and self.hidden:  # 开考、考试结束：自动回到大屏
+                self.expand()
+            self.draw(phase)
+        t = time.gmtime(now + 8 * 3600)
+        self.cv.itemconfig(self.clock, text=time.strftime("%H:%M", t))
+        if phase in ("before", "during"):
+            left = int((ex["start_ts"] if phase == "before" else ex["end_ts"]) - now + 0.999)
+            h, rest = divmod(max(0, left), 3600)
+            text = f"{h}:{rest // 60:02d}:{rest % 60:02d}" if h else f"{rest // 60:02d}:{rest % 60:02d}"
+            last = phase == "during" and left <= 15 * 60
+            self.cv.itemconfig(self.count, text=text, fill=self.RED if last else self.GOLD if phase == "during" else self.BLUE)
+            if phase == "during":
+                self.cv.itemconfig(self.status, text="● 最后 15 分钟" if last else "● 考试进行中", fill=self.RED if last else self.GOLD)
+                frac = min(1, max(0, (now - ex["start_ts"]) / max(1, ex["end_ts"] - ex["start_ts"])))
+                x1, y1, x2, y2 = self.bar
+                if self.bar_fill:
+                    self.cv.delete(self.bar_fill)
+                self.bar_fill = round_rect(self.cv, x1, y1, x1 + max(2 * u, (x2 - x1) * frac), y2, 1 * u, fill=self.RED if last else self.BLUE, width=0)
+            if self.mini:
+                self.mini_cv.itemconfig(self.mini_count, text=("剩 " if phase == "during" else "距开考 ") + text,
+                                        fill=self.RED if last else self.GOLD if phase == "during" else self.BLUE)
+        elif self.mini:
+            self.mini_cv.itemconfig(self.mini_count, text="考试结束", fill=self.GOLD)
+        self.speak(now)
+        self.win.after(1000, self.tick)
+
+    def speak(self, now):
+        """开考、剩 15 分钟、结束各播报一次；晚了 90 秒以上（比如刚开机）就不补了"""
+        ex = self.ex
+        moments = [("start", ex["start_ts"]), ("end", ex["end_ts"])]
+        if ex["end_ts"] - ex["start_ts"] > 20 * 60:
+            moments.append(("warn", ex["end_ts"] - 15 * 60))
+        for name, at in moments:
+            k = (ex["key"], name)
+            if at <= now < at + 90 and k not in self.app.exam_played:
+                self.app.exam_played.add(k)
+                self.expand()  # 收起了的话，播报时自动回到大屏
+                announce((ex.get("voice") or {}).get(name), speak=EXAM_SAY[name])
+                log(f"考试播报：{ex['subject']} {EXAM_SAY[name]}")
+
+    def close(self):
+        for w in (self.mini, self.win):
+            try:
+                if w:
+                    w.destroy()
+            except tk.TclError:
+                pass
+
+
 # ---------------- 主程序 ----------------
+class ToolTab:
+    """屏幕右边的「工具」小把手：老师站在一体机前直接点计时、抽号，不用掏手机。放 PPT 时也在最上面"""
+    MINUTES = (1, 3, 5, 10, 15, 20)
+
+    def __init__(self, app):
+        self.app, self.panel, self.close_job = app, None, None
+        sw, sh = app.sw, app.sh
+        self.w, self.h = max(30, int(sh * 0.034)), max(84, int(sh * 0.1))
+        self.win = tk.Toplevel(app.root)
+        self.win.overrideredirect(True)
+        self.win.attributes("-topmost", True)
+        self.win.geometry(f"{self.w}x{self.h}+{sw - self.w}+{int(sh * 0.42)}")
+        float_window(self.win)
+        if app.x11.composite:
+            self.win.attributes("-alpha", 0.72)
+        cv = tk.Canvas(self.win, width=self.w, height=self.h, bg=INK, highlightthickness=0, cursor="hand2")
+        cv.pack()
+        cv.create_text(self.w / 2, self.h / 2, text="工\n具", fill="#ffffff", font=app.font(int(self.w * 0.52), True), justify="center")
+        cv.bind("<Button-1>", lambda e: self.toggle())
+
+    def lift(self):
+        if self.panel and not self.panel.winfo_exists():  # 面板被别的程序关掉了
+            self.panel = None
+        for w in (self.win, self.panel):
+            if w:
+                w.attributes("-topmost", True)
+                w.lift()
+
+    def toggle(self):
+        if self.panel:
+            return self.close_panel()
+        app, sh = self.app, self.app.sh
+        u = sh / 100
+        pw, ph = int(26 * u), int(36 * u)
+        self.panel = tk.Toplevel(app.root)
+        self.panel.overrideredirect(True)
+        self.panel.attributes("-topmost", True)
+        self.panel.geometry(f"{pw}x{ph}+{app.sw - self.w - pw}+{int(sh * 0.42 + self.h / 2 - ph / 2)}")
+        float_window(self.panel)
+        cv = tk.Canvas(self.panel, width=pw, height=ph, bg="#ffffff", highlightthickness=0)
+        cv.pack()
+        cv.create_rectangle(0, 0, pw - 1, ph - 1, outline=LINE)
+        cv.create_text(2.4 * u, 3.6 * u, text="计时（分钟）", anchor="w", fill=MUTED, font=app.font(int(1.8 * u), True))
+        gap, bw, bh = 1.2 * u, (pw - 4.8 * u - 2.4 * u) / 3, 6.4 * u
+        for k, m in enumerate(self.MINUTES):
+            x, y = 2.4 * u + (k % 3) * (bw + gap), 6.2 * u + (k // 3) * (bh + gap)
+            tag = f"m{m}"
+            round_rect(cv, x, y, x + bw, y + bh, 1.4 * u, fill="#f4f7fb", outline=LINE, width=2, tags=tag)
+            cv.create_text(x + bw / 2, y + bh / 2, text=str(m), fill=INK, font=app.font(int(3 * u), True, digits=True), tags=tag)
+            cv.tag_bind(tag, "<Button-1>", lambda e, m=m: self.use({"tool": "timer", "seconds": m * 60}))
+        y = 6.2 * u + 2 * (bh + gap) + 1.2 * u
+        round_rect(cv, 2.4 * u, y, pw - 2.4 * u, y + 7 * u, 1.6 * u, fill="#8b7cf6", width=0, tags="pick")
+        cv.create_text(pw / 2, y + 3.5 * u, text="随机抽一位", fill="#ffffff", font=app.font(int(2.6 * u), True), tags="pick")
+        cv.tag_bind("pick", "<Button-1>", lambda e: self.use({"tool": "pick"}))
+        cv.create_text(pw / 2, ph - 3 * u, text="收起", fill=MUTED, font=app.font(int(2 * u), True), tags="close")
+        cv.tag_bind("close", "<Button-1>", lambda e: self.close_panel())
+        self.close_job = self.panel.after(10000, self.close_panel)  # 10 秒不点自动收起
+
+    def close_panel(self):
+        if self.panel:
+            try:
+                self.panel.destroy()
+            except tk.TclError:
+                pass
+        self.panel = None
+
+    def use(self, body):
+        self.close_panel()
+        app = self.app
+
+        def run():
+            try:
+                req = urllib.request.Request(TOOL_URL, data=json.dumps({**body, "class": CLASS}).encode(),
+                                             headers={"Content-Type": "application/json"})
+                urllib.request.urlopen(req, timeout=8).read()
+                app.inbox.put(("poll", fetch_json(POLL_URL)))  # 不等下一轮，马上把计时 / 抽号拉回来显示
+            except urllib.error.HTTPError as e:
+                try:
+                    msg = json.loads(e.read().decode("utf-8")).get("error") or str(e)
+                except Exception:
+                    msg = str(e)
+                app.inbox.put(("tip", msg))
+            except Exception as e:
+                log(f"大屏工具失败：{e}")
+                app.inbox.put(("tip", "没连上服务器，请稍后再试"))
+        threading.Thread(target=run, daemon=True).start()
+
+    def destroy(self):
+        self.close_panel()
+        try:
+            self.win.destroy()
+        except tk.TclError:
+            pass
+
+
 class App:
     def __init__(self):
         self.root = tk.Tk()
@@ -1112,7 +1792,10 @@ class App:
         self.standby_forced = False
         self.standby_at = 0
         self.morning = None  # 早读页
+        self.tooltab = None  # 屏幕右边「工具」小把手
+        self.shooting = False  # 正在截图、上传（要一两秒，别重复截）
         self.morning_dismissed = None
+        self.exam, self.exam_played, self.exam_rev, self.awake_at = None, set(), None, 0  # 考试大屏、已播报过的提示、考试安排的版本
         self.handled = set()
         self.pending_restart = False
         self.fonts = {}
@@ -1129,6 +1812,7 @@ class App:
             hello.place(0)
             self.root.after(4000, hello.close)
         threading.Thread(target=ensure_desktop_icon, daemon=True).start()
+        threading.Thread(target=clean_files, daemon=True).start()
         for target in (self.poll_loop, self.board_loop, self.update_loop):
             threading.Thread(target=target, daemon=True).start()
         self.root.after(200, self.process)
@@ -1190,6 +1874,12 @@ class App:
                 if fails == 1 or fails % 30 == 0:
                     log(f"连接服务器失败（第 {fails} 次）：{e}")
             time.sleep(2)
+
+    def fetch_board_now(self):
+        try:
+            self.inbox.put(("board", fetch_json(BOARD_URL)))
+        except Exception as e:
+            log(f"拉取看板失败：{e}")
 
     def board_loop(self):
         while True:
@@ -1256,7 +1946,14 @@ class App:
             while True:
                 kind, data = self.inbox.get_nowait()
                 if kind == "poll":
-                    self.apply(data)
+                    try:
+                        self.apply(data)
+                    except Exception as e:  # 出错也不能停：否则之后的消息都不显示了
+                        log(f"处理消息出错：{e}")
+                elif kind == "tip":  # 大屏工具出错（如没有名单）：角落小提示几秒
+                    tip = MessageCard(self, {"id": 0, "text": data, "sender": "班级助手", "time": time.strftime("%H:%M"), "popup": False})
+                    tip.place(0)
+                    self.root.after(5000, tip.close)
                 else:
                     self.board = data
                     key = data.get("screen_font") or "misans"
@@ -1272,7 +1969,7 @@ class App:
                         self.family, self.fonts = want, {}
         except queue.Empty:
             pass
-        if self.pending_restart and not self.cards:
+        if self.pending_restart and not self.cards and not self.exam:  # 考试时不重启
             log("重启以加载新版本 / 新字体")
             if WIN:  # Windows 的 execv 是另起一个进程：先放开"只运行一个"的锁，再启动新进程、退出自己
                 MUTEX[1].CloseHandle(MUTEX[0])
@@ -1284,7 +1981,21 @@ class App:
     def apply(self, data):
         if data.get("server_time"):
             self.offset = data["server_time"] - time.time()
+        rev = data.get("exam_rev")
+        if rev and rev != self.exam_rev:  # 老师改了考试安排（或提前结束）：马上重新拉看板
+            if self.exam_rev is not None:
+                threading.Thread(target=self.fetch_board_now, daemon=True).start()
+            self.exam_rev = rev
         self.in_class = bool(data.get("in_class"))
+        if data.get("shot") and not self.shooting:  # 班主任在工作台点了"看一眼大屏"
+            self.shooting = True
+
+            def run():
+                try:
+                    send_shot(self.sw, self.sh)
+                finally:
+                    self.shooting = False
+            threading.Thread(target=run, daemon=True).start()
         active = set()
         for m in data.get("messages") or []:
             if m.get("kind") == "uninstall":  # 班主任在工作台点了"远程卸载"
@@ -1311,7 +2022,7 @@ class App:
         if kind == "prep" and m.get("popup") and self.x11.ok and self.x11.idle_seconds() < 60:
             m = {**m, "popup": False, "voice": False}  # 老师还在用大屏（可能拖堂）：只在角落小提示
         try:
-            card = {"timer": TimerCard, "pick": PickCard, "collect": CollectCard, "attend": CollectCard, "image": ImageCard}.get(kind, MessageCard)(self, m)
+            card = {"timer": TimerCard, "pick": PickCard, "collect": CollectCard, "attend": CollectCard, "image": ImageCard, "file": FileCard}.get(kind, MessageCard)(self, m)
         except Exception as e:
             log(f"显示消息失败：{e}")
             return
@@ -1373,7 +2084,53 @@ class App:
             self.morning.close()
             self.morning = None
 
+    def check_exam(self):
+        """按服务器时间找现在要显示的那场考试（开考前 15 分钟到结束后 5 分钟）"""
+        now = time.time() + self.offset
+        ex = next((x for x in self.board.get("exams") or [] if x["show_from"] <= now < x["hide_at"]), None)
+        if self.exam and (not ex or self.exam.key != exam_key(ex)):  # 收起，或者老师改了这场考试：重画
+            self.exam.close()
+            self.exam = None
+            if not ex:
+                log("考试大屏收起")
+                self.x11.allow_sleep()
+        if ex and not self.exam:
+            self.hide_morning()
+            self.hide_standby()
+            self.exam = ExamBoard(self, ex)
+            for card in self.cards.values():  # 紧急消息照常显示在最前面
+                card.lift()
+            log(f"显示考试大屏：{ex['subject']} {ex['start']}–{ex['end']}")
+
+    def sync_tooltab(self):
+        """有考试大屏、早读页、看板时不显示；工作台可以关掉"""
+        want = self.board.get("tools_tab", True) and not self.exam and not self.morning and not self.standby
+        if self.tooltab and not self.tooltab.win.winfo_exists():  # 把手被别的程序关掉了（如一体机"一键清屏"）：下面重新放一个
+            self.tooltab.destroy()
+            self.tooltab = None
+        if want and not self.tooltab:
+            self.tooltab = ToolTab(self)
+        elif not want and self.tooltab:
+            self.tooltab.destroy()
+            self.tooltab = None
+        elif self.tooltab:
+            self.tooltab.lift()  # 保持在最前面（例如正在放 PPT）
+
     def check_standby(self):
+        try:
+            self.sync_tooltab()
+        except Exception as e:
+            log(f"工具把手出错：{e}")
+        try:
+            self.check_exam()
+        except Exception as e:
+            log(f"考试大屏出错：{e}")
+        if self.exam:  # 考试时不显示早读页和看板，也不让系统屏保出来
+            if time.time() - self.awake_at > 30:
+                self.awake_at = time.time()
+                self.x11.keep_awake()
+            self.root.after(3000, self.check_standby)
+            return
         try:
             self.check_morning()
         except Exception as e:
@@ -1390,6 +2147,8 @@ class App:
                 touched = self.x11.ok and idle < max(2, shown_for - 3)  # 显示之后有人碰过屏幕
                 if (touched and shown_for > 4) or (not window and not self.standby_forced):
                     self.hide_standby()
+                elif board_sig(self.board) != self.standby_sig:  # 显示着的时候老师改了作业、公告、时间安排：重画
+                    self.show_standby(forced=self.standby_forced)
             elif (cfg.get("enabled") and self.x11.ok and not self.cards and window and not self.morning
                   and idle >= max(1, cfg.get("idle_minutes", 5)) * 60):
                 self.show_standby()
@@ -1402,6 +2161,7 @@ class App:
             self.standby.close()
         self.standby = (Standby if self.board.get("evening") else DayStandby)(self, self.board)  # 晚自习夜空版，白天浅色版
         self.standby_forced, self.standby_at = forced, time.time()
+        self.standby_sig = board_sig(self.board)
         log("显示看板" + ("（手动）" if forced else ""))
 
     def hide_standby(self):

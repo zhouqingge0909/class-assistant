@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- 这一页专门用来"添加到手机桌面"：不挂 manifest，iPhone 才会把带登录码的当前地址存成桌面图标。
+     iPhone 桌面图标打开时和 Safari 不共用登录状态，所以每次从图标进来都先在这里认一下登录码。 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="班级助手">
+<meta name="theme-color" content="#16a571">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="icon" type="image/png" href="/favicon.png">
+<title>班级助手</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 18px; color: #23324a;
+    font: 16px/1.7 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: radial-gradient(900px 520px at -5% -10%, #d6f5e6 0, transparent 60%), radial-gradient(800px 480px at 105% 0%, #dcefff 0, transparent 60%), #f3faf7; }
+  .card { width: 100%; max-width: 400px; background: #fff; border-radius: 26px; padding: 28px 22px; box-shadow: 0 12px 32px rgba(35, 50, 74, .08); }
+  .logo { width: 64px; height: 64px; border-radius: 18px; margin: 0 auto 12px; display: block; }
+  h1 { margin: 0 0 4px; font-size: 21px; text-align: center; }
+  .sub { margin: 0 0 16px; color: #7a8699; text-align: center; font-size: 14.5px; }
+  ol { margin: 0; padding-left: 0; list-style: none; counter-reset: s; }
+  li { counter-increment: s; position: relative; padding: 10px 0 10px 40px; border-top: 1px solid #edf1f5; }
+  li:first-child { border-top: 0; }
+  li::before { content: counter(s); position: absolute; left: 0; top: 11px; width: 28px; height: 28px; border-radius: 50%; background: #16a571; color: #fff; font-weight: 800; display: grid; place-items: center; font-size: 15px; }
+  b { color: #0f7a53; }
+  .tab { display: flex; gap: 8px; margin: 0 0 8px; }
+  .tab button { flex: 1; font: inherit; font-weight: 700; padding: 8px; border-radius: 12px; border: 1.5px solid #e6ecf2; background: #fff; color: #7a8699; }
+  .tab button.on { border-color: #16a571; background: #e2f7ee; color: #0f7a53; }
+  .go { display: block; width: 100%; margin-top: 16px; font: inherit; font-weight: 800; font-size: 17px; border: 0; border-radius: 16px; padding: 13px; color: #fff; background: #16a571; text-align: center; text-decoration: none; }
+  .note { background: #fff8e6; border-radius: 12px; padding: 10px 14px; font-size: 14px; color: #7a5a12; margin-top: 12px; }
+  .arrow { position: fixed; top: 6px; right: 14px; font-size: 44px; line-height: 1; color: #16a571; animation: b 1s infinite alternate; }
+  @keyframes b { to { transform: translate(4px, -6px); } }
+</style>
+</head>
+<body>
+<div class="card"><img class="logo" src="/icon-180.png" alt=""><div id="body"><p class="sub">正在登录…</p></div></div>
+<script>
+const q = new URLSearchParams(location.search), $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const get = k => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
+const save = (t, n) => { try { localStorage.setItem('cc_token', t); localStorage.setItem('cc_name', n); } catch {} };
+const ua = navigator.userAgent;
+const wechat = /MicroMessenger/i.test(ua);
+const ios = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+
+async function ensureLogin() {
+  const t = get('cc_token');
+  if (t) {  // 已经登录过就不再新开会话（安卓桌面图标每次都会经过这里）
+    try { const r = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + t } }); if (r.ok) return; } catch {}
+  }
+  const r = await fetch('/api/login/link', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ u: q.get('u'), k: q.get('k') }) });
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || '登录失败');
+  save(j.token, j.name);
+}
+
+function guide() {
+  if (wechat) {
+    $('#body').innerHTML = `<div class="arrow">↗</div><h1>先换到手机浏览器</h1><p class="sub">微信里没法添加到桌面</p>
+      <ol><li>点右上角的 <b>···</b></li><li>${ios ? '选 <b>在 Safari 中打开</b>' : '选 <b>在浏览器打开</b>'}</li><li>打开后照着页面上的提示做</li></ol>
+      <a class="go" href="/">先不加，直接进工作台</a>`;
+    return;
+  }
+  const steps = {
+    ios: `<li>点屏幕下方的 <b>分享</b> 按钮（方框加向上箭头；新系统先点右下角 <b>···</b>）</li>
+          <li>往下找到 <b>添加到主屏幕</b></li><li>点右上角 <b>添加</b>，桌面就有"班级助手"了</li>`,
+    android: `<li>点浏览器的 <b>菜单</b>（右上角 ⋮，或底部 ≡）</li>
+          <li>选 <b>添加到桌面</b>（也可能叫"添加到主屏幕""发送到桌面""添加快捷方式"）</li>
+          <li>如果提示权限，允许"创建桌面快捷方式"</li>`,
+  };
+  const show = os => {
+    $('#body').innerHTML = `<h1>✅ 已登录</h1><p class="sub">现在把这一页添加到手机桌面</p>
+      <div class="tab"><button data-os="ios" class="${os === 'ios' ? 'on' : ''}">苹果手机</button><button data-os="android" class="${os === 'android' ? 'on' : ''}">安卓手机</button></div>
+      <ol>${steps[os]}</ol>
+      <div class="note">以后点桌面上的"班级助手"图标，就直接进工作台，不用再登录。</div>
+      <a class="go" href="/">进入工作台</a>`;
+    document.querySelectorAll('[data-os]').forEach(b => b.onclick = () => show(b.dataset.os));
+  };
+  show(ios ? 'ios' : 'android');
+}
+
+(async () => {
+  if (!q.get('u') || !q.get('k')) { $('#body').innerHTML = '<h1>链接不完整</h1><p class="sub">请在工作台右上角小人图标里，重新点"添加到手机桌面"。</p>'; return; }
+  try { await ensureLogin(); }
+  catch (e) { $('#body').innerHTML = `<h1>登录失败</h1><p class="sub">${esc(e.message)}</p>`; return; }
+  if (standalone) location.replace('/');  // 从桌面图标打开：直接进工作台
+  else guide();
+})();
+</script>
+</body>
+</html>
