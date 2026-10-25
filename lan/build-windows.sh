@@ -11,7 +11,7 @@ MIRROR="https://registry.npmmirror.com/-/binary/python/$PYVER"
 PIP_INDEX="${PIP_INDEX:-https://mirrors.aliyun.com/pypi/simple}"
 mkdir -p "$CACHE/wheels" "$LAN/out"
 
-echo "== 1/4 下载 Python ${PYVER}（免安装版 + 给 Windows 一体机用的安装包）"
+echo "== 1/5 下载 Python ${PYVER}（免安装版 + 给 Windows 一体机用的安装包）"
 for f in "python-$PYVER-embed-amd64.zip" "python-$PYVER-amd64.exe" "python-$PYVER.exe"; do
   [ -s "$CACHE/$f" ] || curl -fL -m 900 -o "$CACHE/$f" "$MIRROR/$f"
 done
@@ -25,11 +25,31 @@ done <<EOF
 b355cfc84b681ace8908ae50908e8761 python-$PYVER.exe
 EOF
 
-echo "== 2/4 下载依赖（pillow 处理图片、qrcode 生成二维码）"
+echo "== 2/5 下载依赖（pillow 处理图片、qrcode 生成二维码）"
 python3 -m pip download -q -d "$CACHE/wheels" --platform win_amd64 --python-version 38 --implementation cp --abi cp38 \
   --only-binary=:all: --index-url "$PIP_INDEX" "pillow==10.4.0" "qrcode==7.4.2" "colorama" 2>&1 | grep -v "pip version\|upgrade pip" || true
 
-echo "== 3/4 组装"
+echo "== 3/5 下载麒麟一体机缺 tkinter 时用的包（Ubuntu 20.04，麒麟 V10 就是基于它的）"
+U="https://mirrors.aliyun.com/ubuntu"
+while read -r arch pkg path sum; do
+  f="$CACHE/tk-$arch/$pkg.deb"
+  mkdir -p "$CACHE/tk-$arch"
+  base="$U"; [ "$arch" = arm64 ] && base="$U-ports"
+  [ -s "$f" ] || curl -fL -m 300 -o "$f" "$base/$path"
+  got=$(if command -v shasum >/dev/null; then shasum -a 256 "$f"; else sha256sum "$f"; fi | cut -d' ' -f1)
+  [ "$got" = "$sum" ] || { echo "❌ $arch/$pkg 校验不对，删掉 lan/.cache/tk-$arch 再试"; exit 1; }
+done <<DEBS
+amd64 python3-tk pool/main/p/python3-stdlib-extensions/python3-tk_3.8.10-0ubuntu1~20.04_amd64.deb 361757e84f4abeb50f5aa0a2856e8bcc749d8e2e353ec6a9760288d1f4ba3c51
+amd64 libtk8.6 pool/main/t/tk8.6/libtk8.6_8.6.10-1_amd64.deb 086c346e6c2b55798e40ebb46519bfdf1de98a651c8730802769445735d66c9a
+amd64 libtcl8.6 pool/main/t/tcl8.6/libtcl8.6_8.6.10+dfsg-1_amd64.deb 390780dbbccaad89676577ebe681e588ee170637a6f272e6f74fcb041f90785f
+amd64 tk8.6-blt2.5 pool/main/b/blt/tk8.6-blt2.5_2.5.3+dfsg-4_amd64.deb e27ce27e78cb2e76c4624a3ca2591be613f875c1c53d00ed66a96de6e1a7bcb1
+arm64 python3-tk pool/main/p/python3-stdlib-extensions/python3-tk_3.8.10-0ubuntu1~20.04_arm64.deb c15160d124d61f5fa4bb481b202a699e4e47e9544aa398a17369dc311343710c
+arm64 libtk8.6 pool/main/t/tk8.6/libtk8.6_8.6.10-1_arm64.deb be1ccd1a5f03d9e8ab8217ea9f80f12a4900eec30a09c6567320d8a23a33d95e
+arm64 libtcl8.6 pool/main/t/tcl8.6/libtcl8.6_8.6.10+dfsg-1_arm64.deb b06966ac7ff8e2f4d3e54c1b7f4c43f6f3042f54765664e728f8ee4cad2b53d2
+arm64 tk8.6-blt2.5 pool/main/b/blt/tk8.6-blt2.5_2.5.3+dfsg-4_arm64.deb 0b05b822a4d80c7e1379dfb0e0d1b004d1215e090a48963bf5249906bbb44e50
+DEBS
+
+echo "== 4/5 组装"
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 PKG="$OUT/班级助手局域网版"
@@ -41,6 +61,9 @@ unzip -q "$CACHE/python-$PYVER-embed-amd64.zip" -d "$APP/python"
 printf 'python38.zip\r\n.\r\nLib\\site-packages\r\nimport site\r\n' > "$APP/python/python38._pth"
 for w in "$CACHE"/wheels/*.whl; do unzip -q -o "$w" -d "$APP/python/Lib/site-packages"; done
 cp "$CACHE/python-$PYVER-amd64.exe" "$CACHE/python-$PYVER.exe" "$APP/dist/python/"
+mkdir -p "$APP/dist/tk"
+cp -R "$CACHE/tk-amd64" "$APP/dist/tk/amd64"
+cp -R "$CACHE/tk-arm64" "$APP/dist/tk/arm64"
 find "$PKG" \( -name .DS_Store -o -name '*.bak*' -o -name __pycache__ \) -prune -exec rm -rf {} +
 
 # .bat 转成 GBK + CRLF（中文 Windows 的命令行只认这个）；说明转成带 BOM 的 UTF-8 + CRLF（记事本都能正常显示）
@@ -62,7 +85,7 @@ if find "$PKG" \( -name config.json -o -name 'students.csv*' -o -name tts.json -
   echo "❌ 包里混进了数据或说明文件，已停止"; exit 1
 fi
 
-echo "== 4/4 打包"
+echo "== 5/5 打包"
 ZIP="$LAN/out/class-assistant-lan-windows.zip"
 rm -f "$ZIP"
 # 文件名用 GBK 存（不标 UTF-8）：中文 Windows 自带的解压（包括 Win7）、360压缩、7-Zip 都不会乱码

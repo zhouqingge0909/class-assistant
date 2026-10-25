@@ -99,6 +99,7 @@ COLLECT_URL = f"{SERVER}/collect?class={Q_CLASS}&key={Q_KEY}"
 ATTEND_URL = f"{SERVER}/attend?class={Q_CLASS}&key={Q_KEY}"
 SHOW_FLAG = os.path.join(HERE, "show-board")  # 桌面"班级看板"图标会创建这个文件
 FFPLAY = None if WIN else shutil.which("ffplay")
+APLAY = None if WIN or FFPLAY else (shutil.which("paplay") or shutil.which("aplay"))  # 没有 ffplay 时用系统自带的放 wav（局域网版的语音和叮咚都是 wav）
 audio_lock = threading.Lock()
 
 
@@ -114,10 +115,14 @@ def play(path):
     if FFPLAY:
         subprocess.run([FFPLAY, "-nodisp", "-autoexit", "-loglevel", "quiet", SERVER + path],
                        stdin=subprocess.DEVNULL, timeout=120)
+    elif APLAY and path.endswith(".wav"):
+        local = fetch_sound(path)
+        subprocess.run([APLAY, local] if APLAY.endswith("paplay") else [APLAY, "-q", local],
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
 
 
-def win_play(path):
-    """Windows：先下载到本地（叮咚只下载一次），再用系统自带的 winmm 播放 mp3/wav"""
+def fetch_sound(path):
+    """先下载到本地再播放（叮咚只下载一次）"""
     cache = os.path.join(HERE, "sound")
     os.makedirs(cache, exist_ok=True)
     name = os.path.basename(path)
@@ -128,6 +133,12 @@ def win_play(path):
         with open(local + ".tmp", "wb") as f:
             f.write(data)
         os.replace(local + ".tmp", local)
+    return local
+
+
+def win_play(path):
+    """Windows：用系统自带的 winmm 播放 mp3/wav"""
+    local = fetch_sound(path)
     mci = ctypes.windll.winmm.mciSendStringW
     alias = "cc%d" % threading.get_ident()
     if mci(f'open "{local}" type mpegvideo alias {alias}', None, 0, None) != 0:
@@ -1817,7 +1828,7 @@ class App:
             threading.Thread(target=target, daemon=True).start()
         self.root.after(200, self.process)
         self.root.after(3000, self.check_standby)
-        log(f"接收端 v2 启动：班级={CLASS} 服务器={SERVER} 字体={self.family} 声音={'系统自带（winmm）' if WIN else 'ffplay' if FFPLAY else '无'} "
+        log(f"接收端 v2 启动：班级={CLASS} 服务器={SERVER} 字体={self.family} 声音={'系统自带（winmm）' if WIN else 'ffplay' if FFPLAY else os.path.basename(APLAY) + '（只能放 wav）' if APLAY else '无'} "
             f"空闲检测={'可用' if self.x11.ok else '不可用'} 窗口特效={'有' if self.x11.composite else '无'}")
 
     def font(self, px, bold=False, digits=False):

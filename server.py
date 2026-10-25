@@ -1625,6 +1625,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 with open(pyexe, "rb") as f:
                     return shutil.copyfileobj(f, self.wfile)
+            tkdeb = os.path.join(BASE, "dist", "tk", os.path.basename(os.path.dirname(u.path)), name)
+            if re.fullmatch(r"/dist/tk/(amd64|arm64)/(python3-tk|libtk8\.6|libtcl8\.6|tk8\.6-blt2\.5)\.deb", u.path) and os.path.isfile(tkdeb):
+                # 局域网版：麒麟一体机缺 tkinter、又不能上网时，从这里下载（Ubuntu 20.04 的包，麒麟 V10 能用）
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(os.path.getsize(tkdeb)))
+                self.end_headers()
+                with open(tkdeb, "rb") as f:
+                    return shutil.copyfileobj(f, self.wfile)
             if name == "myip":
                 body = self.client_address[0].encode()
             elif name in ("setup.sh", "class-assistant.tar.gz") and os.path.exists(os.path.join(BASE, "dist", name)):

@@ -21,6 +21,12 @@ if ! python3 -c "import tkinter" 2>/dev/null && [ ! -d "$DIR/tk" ]; then
   echo "本机缺少 tkinter，正在免密码安装到 $DIR/tk ..."
   DEB="$DIR/tk-deb"; mkdir -p "$DEB"
   (cd "$DEB" && apt-get download python3-tk libtk8.6 libtcl8.6 tk8.6-blt2.5 >/dev/null 2>&1)
+  ARCH=$(dpkg --print-architecture 2>/dev/null)
+  if ! ls "$DEB"/*.deb >/dev/null 2>&1 && [ -n "$ARCH" ]; then  # 不能上网：从局域网版服务器下载
+    for p in python3-tk libtk8.6 libtcl8.6 tk8.6-blt2.5; do
+      dl "$SERVER/dist/tk/$ARCH/$p.deb" "$DEB/$p.deb" || rm -f "$DEB/$p.deb"
+    done
+  fi
   for f in "$DEB"/*.deb; do [ -f "$f" ] && dpkg -x "$f" "$DIR/tk"; done
   rm -rf "$DEB"
   if [ ! -d "$DIR/tk" ]; then
