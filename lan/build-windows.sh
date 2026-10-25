@@ -1,6 +1,6 @@
 #!/bin/bash
 # 生成局域网版 Windows 压缩包：自带 Python（免安装）、不含任何数据和密码
-# 用法：bash lan/build-windows.sh   →  lan/out/班级助手局域网版-Windows.zip
+# 用法：bash lan/build-windows.sh   →  lan/out/class-assistant-lan-windows.zip
 # 需要：curl、python3（能用 pip）。下载的东西缓存在 lan/.cache，第二次打包不用重新下载。
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -63,7 +63,7 @@ if find "$PKG" \( -name config.json -o -name 'students.csv*' -o -name tts.json -
 fi
 
 echo "== 4/4 打包"
-ZIP="$LAN/out/班级助手局域网版-Windows.zip"
+ZIP="$LAN/out/class-assistant-lan-windows.zip"
 rm -f "$ZIP"
 # 文件名用 GBK 存（不标 UTF-8）：中文 Windows 自带的解压（包括 Win7）、360压缩、7-Zip 都不会乱码
 python3 - "$OUT" "$ZIP" <<'PY'

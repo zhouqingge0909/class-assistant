@@ -33,7 +33,7 @@
 
 ### 局域网版（Windows 电脑，免安装、免联网）
 
-1. 在 [Releases](https://github.com/zhouqingge0909/class-assistant/releases) 下载 **`班级助手局域网版-Windows.zip`**，"全部解压"到学校一台一直开着的 Windows 电脑上（Win7 / 10 / 11，64 位）。
+1. 在 [Releases](https://github.com/zhouqingge0909/class-assistant/releases) 下载 **`class-assistant-lan-windows.zip`**（班级助手局域网版），"全部解压"到学校一台一直开着的 Windows 电脑上（Win7 / 10 / 11，64 位）。
 2. 双击 **「启动班级助手」**。第一次会问"是否允许此应用对你的设备进行更改"，点"是"（在防火墙里放行，手机和一体机才连得上）。
 3. 黑色窗口里会显示**工作台地址**（如 `http://192.168.1.23:8080/`）和**管理员密码**。老师手机连上学校 Wi-Fi，打开这个地址登录，建班、填名单。
 4. 在工作台「班级管理」→「一体机」复制安装命令，到教室一体机上运行。一体机不用联网，需要的东西（包括 Windows 一体机要用的 Python）都从这台电脑下载。
@@ -76,7 +76,7 @@ sudo bash setup.sh
 
 第一次运行时会自动生成 `config.json`（管理员密码、一体机密钥、作息时间等）。**这个文件和 `students.csv`、`data/` 里是你学校的密码和学生信息，不要上传到网上。**
 
-自己打局域网版压缩包：在 Mac 或 Linux 上运行 `bash lan/build-windows.sh`，生成 `lan/out/班级助手局域网版-Windows.zip`。
+自己打局域网版压缩包：在 Mac 或 Linux 上运行 `bash lan/build-windows.sh`，生成 `lan/out/class-assistant-lan-windows.zip`。
 
 ## 隐私
 
