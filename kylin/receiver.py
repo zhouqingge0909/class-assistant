@@ -245,6 +245,9 @@ def send_shot(sw, sh):
 def uninstall_self():
     """工作台点了"远程卸载"：取消开机自启、删掉桌面图标和程序文件夹，然后退出（和 uninstall.sh / uninstall.ps1 做的一样）"""
     log("收到远程卸载指令，开始卸载")
+    UNINSTALLING.set()  # 让 guard_loop 别再把开机自启补回来
+    if not WIN:
+        set_cron(None)
     names = ("作业登记", "考勤登记", "班级看板")
     if WIN:
         buf = ctypes.create_unicode_buffer(260)
@@ -269,6 +272,105 @@ def uninstall_self():
     else:
         shutil.rmtree(HERE, ignore_errors=True)
     os._exit(0)
+
+
+# ---------------- 开机自启看护（麒麟/Linux）----------------
+# 有的一体机会被清理/管控软件清空 ~/.config/autostart，之后开机就不启动了（10-24 高三1班、10-27 网友那边都遇到过）。
+# 运行时每分钟看一眼，被删了就补回去，并把发现的时间写进日志；另加一条 crontab @reboot 当备用入口（不在 ~/.config 里，不用 sudo）。
+UNINSTALLING = threading.Event()
+AUTOSTART = os.path.expanduser("~/.config/autostart/classcall.desktop")
+AUTOSTART_ENTRY = (f"[Desktop Entry]\nType=Application\nName=班级助手接收端\nExec=python3 {SELF}\n"
+                   "X-GNOME-Autostart-enabled=true\nNoDisplay=true\n")  # 和 install.sh 写的一样
+CRON_TAG = "# classcall"
+CRON_LINE = f"@reboot {sys.executable} {SELF} --boot >/dev/null 2>&1 {CRON_TAG}"
+
+
+def ensure_autostart():
+    try:
+        if os.path.isfile(AUTOSTART):
+            return
+        d = os.path.dirname(AUTOSTART)
+        if os.path.isdir(d):
+            left = os.listdir(d)
+            log(f"发现开机自启被删了：文件夹最后修改于 {time.strftime('%m-%d %H:%M', time.localtime(os.path.getmtime(d)))}，"
+                f"里面还剩 {len(left)} 个文件{('：' + '、'.join(left[:8])) if left else ''}。已补回")
+        else:
+            log("发现开机自启文件夹整个没了，已补回")
+        os.makedirs(d, exist_ok=True)
+        with open(AUTOSTART, "w", encoding="utf-8") as f:
+            f.write(AUTOSTART_ENTRY)
+    except Exception as e:
+        log(f"补回开机自启失败：{e}")
+
+
+def set_cron(line):
+    """把 crontab 里带 # classcall 的那行换成 line（None = 删掉）；没装 cron 就算了"""
+    try:
+        r = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=10)
+        old = r.stdout.splitlines() if r.returncode == 0 else []
+        new = [x for x in old if CRON_TAG not in x] + ([line] if line else [])
+        if new == old:
+            return
+        subprocess.run(["crontab", "-"], input="\n".join(new) + "\n", text=True, timeout=10, check=True)
+        if line:
+            log("开机备用入口（crontab）不见了，已补回" if getattr(set_cron, "done", False) else "已设置开机备用入口（crontab @reboot）")
+        set_cron.done = bool(line)
+    except Exception as e:
+        if line and not getattr(set_cron, "failed", False):
+            set_cron.failed = True
+            log(f"设置开机备用入口失败（不影响使用）：{e}")
+
+
+def guard_loop():
+    if WIN or os.path.basename(HERE) != ".classcall":  # 手动从别处运行（比如测试）时不动开机设置
+        return
+    n = 0
+    while not UNINSTALLING.is_set():
+        ensure_autostart()
+        if n % 10 == 0:  # crontab 要开子进程，十分钟看一次
+            set_cron(CRON_LINE)
+        n += 1
+        UNINSTALLING.wait(60)
+
+
+def desktop_env(proc="/proc"):
+    """找一个本用户、已经在桌面里运行的程序，返回它的环境变量；桌面还没登录好就返回 None"""
+    uid, best = os.getuid(), None
+    for pid in os.listdir(proc):
+        if not pid.isdigit() or int(pid) == os.getpid():
+            continue
+        try:
+            if os.stat(os.path.join(proc, pid)).st_uid != uid:
+                continue
+            with open(os.path.join(proc, pid, "environ"), "rb") as f:
+                env = dict(x.split(b"=", 1) for x in f.read().split(b"\0") if b"=" in x)
+        except (OSError, ValueError):
+            continue
+        if b"DISPLAY" in env and (not best or len(env) > len(best)):  # 变量最全的那个，一般就是桌面会话本身
+            best = env
+    if not best:
+        return None
+    env = {k.decode(errors="replace"): v.decode(errors="replace") for k, v in best.items()}
+    for k in ("CLASSCALL_TK", "PYTHONPATH", "LD_LIBRARY_PATH", "TCL_LIBRARY", "TK_LIBRARY"):
+        env.pop(k, None)  # 缺 tkinter 的机器由开头那段重新带上
+    return env
+
+
+def boot_wait():
+    """crontab 开机入口：等老师的桌面登录好，借用桌面程序的环境变量（DISPLAY、声音、DBus）再启动，效果和开机自启一样。
+    开机自启已经把接收端开起来了的话，这里就直接退出"""
+    while True:
+        with open(f"/tmp/classcall-{os.getuid()}.lock", "w") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(lock, fcntl.LOCK_UN)
+            except OSError:
+                sys.exit(0)  # 已经在运行
+        env = desktop_env()
+        if env:
+            time.sleep(20)  # 桌面刚出来，等开机自启先启动；它启动了的话，下面这个新进程拿不到锁会自己退出
+            os.execve(sys.executable, [sys.executable, SELF], env)
+        time.sleep(15)
 
 
 def open_url(url):
@@ -1824,6 +1926,7 @@ class App:
             self.root.after(4000, hello.close)
         threading.Thread(target=ensure_desktop_icon, daemon=True).start()
         threading.Thread(target=clean_files, daemon=True).start()
+        threading.Thread(target=guard_loop, daemon=True).start()
         for target in (self.poll_loop, self.board_loop, self.update_loop):
             threading.Thread(target=target, daemon=True).start()
         self.root.after(200, self.process)
@@ -2216,6 +2319,8 @@ def main():
     if "--show-board" in sys.argv:  # Windows 桌面"班级看板"图标：通知正在运行的接收端显示看板
         open(SHOW_FLAG, "w").close()
         return
+    if "--boot" in sys.argv and not WIN:
+        boot_wait()
     if WIN:
         win_setup()
     else:
