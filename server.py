@@ -1424,7 +1424,7 @@ class Handler(BaseHTTPRequestHandler):
         return [c for c in load_students() if self.role(c)]
 
     def deny(self, level="teacher"):
-        return self.send_json({"error": "只能删除自己发的内容" if level == "own" else "这个操作只有主管理员（用管理员密码登录）可以做" if level == "owner" else "这个操作只有班主任可以做" if level == "head" else
+        return self.send_json({"error": "只能修改或删除自己发的内容" if level == "own" else "这个操作只有主管理员（用管理员密码登录）可以做" if level == "owner" else "这个操作只有班主任可以做" if level == "head" else
                                "管理员才能做这个操作" if level == "admin" else "你不是这个班的老师"}, 403)
 
     def post_check(self, path, body):
@@ -1444,7 +1444,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/recall":
             c = cls_of(messages)
             return None if c and self.allowed(c, "teacher") else "teacher"
-        if path == "/api/notes/delete":  # 自己的留言自己删；班主任能删本班所有留言
+        if path in ("/api/notes/delete", "/api/notes/edit"):  # 自己的留言自己删改；班主任能删改本班所有留言
             n = next((x for x in notes if x["id"] == body.get("id")), None)
             return None if n and (self.allowed(n["class"], "head") or (s and n.get("uid") == s["uid"])) else "own"
         if path == "/api/files/delete":  # 自己发的自己删；班主任能删本班全部
@@ -1459,7 +1459,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/morning/delete":
             c = cls_of(mornings)
             return None if c and self.allowed(c, "teacher") else "teacher"
-        if path in ("/api/homework/delete", "/api/quiz/delete"):
+        if path in ("/api/homework/delete", "/api/homework/edit", "/api/quiz/delete"):
             items = homework if "homework" in path else quizzes
             it = next((x for x in items if x["id"] == body.get("id")), None)
             if not it:
@@ -1807,8 +1807,10 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/homework":
             cls = (q.get("class") or [""])[0]
             day = (q.get("date") or [None])[0] or today()
-            items = [{**h, "due_date": due_date(h), "collect": collect_of(cls, h["id"])} for h in homework_of(cls, day)]
-            due = [{**h, "due_date": due_date(h), "collect": collect_of(cls, h["id"])} for h in homework_due(cls, day) if h["date"] != day]
+            edit = self.allowed(cls, "head") or None  # 班主任能改删全部；任课老师只能改删自己布置的
+            row = lambda h: {**h, "due_date": due_date(h), "collect": collect_of(cls, h["id"]), "can_edit": edit or h.get("teacher") == self.sess()["name"]}
+            items = [row(h) for h in homework_of(cls, day)]
+            due = [row(h) for h in homework_due(cls, day) if h["date"] != day]
             return self.send_json({"items": items, "due": due, "today": day, "total": sum(h["minutes"] for h in items),
                                    "class_size": len(load_students().get(cls, []))})
         if u.path == "/api/reminders":
@@ -1961,7 +1963,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"audio": "/audio/" + audio})
         handler = {
             "/api/me/name": self.api_me_name, "/api/screen/shot": self.api_shot_request,
-            "/api/homework/add": self.api_homework_add, "/api/homework/delete": self.api_homework_delete,
+            "/api/homework/add": self.api_homework_add, "/api/homework/edit": self.api_homework_edit, "/api/homework/delete": self.api_homework_delete,
             "/api/homework/push": self.api_homework_push, "/api/reminders/save": self.api_reminder_save,
             "/api/reminders/delete": self.api_reminder_delete, "/api/phrases/add": self.api_phrase_add,
             "/api/phrases/delete": self.api_phrase_delete, "/api/tools/timer": self.api_timer,
@@ -1979,7 +1981,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/classroom/uninstall": self.api_classroom_uninstall,
             "/api/morning/add": self.api_morning_add, "/api/morning/delete": self.api_morning_delete,
             "/api/exams/save": self.api_exam_save, "/api/exams/delete": self.api_exam_delete, "/api/exams/end": self.api_exam_end,
-            "/api/notes/add": self.api_note_add, "/api/notes/delete": self.api_note_delete,
+            "/api/notes/add": self.api_note_add, "/api/notes/edit": self.api_note_edit, "/api/notes/delete": self.api_note_delete,
             "/api/files/delete": self.api_file_delete,
             "/api/admin/password": self.api_admin_password, "/api/admins/set": self.api_admins_set,
             "/api/backup/now": lambda body, sender: self.send_json({"ok": True, "name": make_backup(), "items": list_backups()}),
@@ -2205,6 +2207,21 @@ class Handler(BaseHTTPRequestHandler):
             write_json(NOTES_PATH, notes)
         self.send_json({"ok": True, "item": item})
 
+    def api_note_edit(self, body, sender):
+        text = re.sub(r"\s+", " ", str(body.get("text") or "")).strip()[:120]
+        if not text:
+            return self.send_json({"error": "请填写留言内容"}, 400)
+        d = now_cn().date()
+        until = {"today": d, "week": d + timedelta(days=6 - d.weekday())}.get(body.get("keep"))
+        with lock:
+            n = next((x for x in notes if x["id"] == body.get("id")), None)
+            if not n:
+                return self.send_json({"error": "这条留言已经不在了"}, 404)
+            n.update({"text": text, "subject": str(body.get("subject") or "").strip()[:6],
+                      "until": until.strftime("%Y-%m-%d") if until else ""})
+            write_json(NOTES_PATH, notes)
+        self.send_json({"ok": True, "item": n})
+
     def api_note_delete(self, body, sender):
         with lock:
             notes[:] = [n for n in notes if n["id"] != body.get("id")]
@@ -2406,6 +2423,22 @@ class Handler(BaseHTTPRequestHandler):
             create_messages([cls], text, sender, body.get("voice"), False, True, body.get("voice_name"),
                             kind="homework", say=f"{subject}作业：{content}", repeat=1)
         self.send_json({"ok": True, "item": item})
+
+    def api_homework_edit(self, body, sender):
+        subject = str(body.get("subject") or "").strip()[:10]
+        content = str(body.get("content") or "").strip()[:TEXT_LIMIT if PUBLIC else 300]
+        if not subject or not content:
+            return self.send_json({"error": "请填写科目和作业内容"}, 400)
+        with lock:
+            h = next((x for x in homework if x["id"] == body.get("id")), None)
+            if not h:
+                return self.send_json({"error": "这条作业已经不在了"}, 404)
+            h.update({"subject": subject, "content": content, "minutes": max(0, min(300, int(body.get("minutes") or 0))),
+                      "due": str(body.get("due") or "").strip()[:20]})
+            h.pop("due_date", None)  # 交作业日期按新的"什么时候交"重算
+            h["due_date"] = due_date(h)
+            write_json(HOMEWORK_PATH, homework)
+        self.send_json({"ok": True, "item": h})
 
     def api_homework_delete(self, body, sender):
         with lock:

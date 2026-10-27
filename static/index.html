@@ -531,14 +531,15 @@
             <div class="sec"><div class="label">作业内容</div><textarea class="input" id="hwContent" maxlength="300" placeholder="如：练习册 P45 第 3–8 题"></textarea></div>
             <div class="sec"><div class="label"><svg class="i sm"><use href="#i-clock"/></svg>预计用时（分钟）</div><div class="chips" id="hwMinutes"></div></div>
             <div class="sec"><div class="label"><svg class="i sm"><use href="#i-cal"/></svg>什么时候交</div><div class="chips" id="hwDue"></div></div>
-            <div class="sec opts">
+            <div class="sec opts" id="hwPushBox">
               <label class="switch"><input type="checkbox" id="hwPush" checked><span class="track"></span>推送到大屏（上课中会下课后再发）</label>
               <input type="checkbox" id="hwVoice" hidden>
             </div>
             <button class="btn primary big" id="hwAdd" style="margin-top:20px"><svg class="i"><use href="#i-check"/></svg>布置</button>
+            <div class="row hidden" id="hwEditBar" style="margin-top:10px;gap:8px;align-items:center;flex-wrap:wrap"><span class="me">正在修改，大屏一分钟内更新</span><button class="btn ghost sm" id="hwCancel">不改了</button><button class="btn ghost sm" id="hwDel" style="color:#ef5a5a">删除这条</button></div>
           </div>
           <div class="card">
-            <div class="ctitle"><div class="ib"><svg class="i"><use href="#i-cal"/></svg></div><div><h2>今日作业</h2><div class="sub" id="hwDate"></div></div>
+            <div class="ctitle"><div class="ib"><svg class="i"><use href="#i-cal"/></svg></div><div><h2>今日作业</h2><div class="sub"><span id="hwDate"></span> · 点一下修改</div></div>
               <button class="btn ghost sm right" id="hwExport">导出</button></div>
             <div class="total"><b id="hwTotal">0</b><span>分钟</span><span class="me" id="hwLimit" style="margin-left:auto"></span></div>
             <div class="meter" id="hwMeter"><div style="width:0"></div></div>
@@ -577,9 +578,10 @@
             <div class="sec"><div class="label">署名科目（可不选）</div><div class="chips" id="ntSubjects"></div></div>
             <div class="sec"><div class="label"><svg class="i sm"><use href="#i-cal"/></svg>显示到</div><div class="chips" id="ntKeep"></div></div>
             <button class="btn primary big" id="ntAdd" style="margin-top:16px"><svg class="i"><use href="#i-check"/></svg>发布到大屏</button>
+            <div class="row hidden" id="ntEditBar" style="margin-top:10px;gap:8px;align-items:center;flex-wrap:wrap"><span class="me">正在修改，大屏一分钟内更新</span><button class="btn ghost sm" id="ntCancel">不改了</button><button class="btn ghost sm" id="ntDel" style="color:#ef5a5a">删除这条</button></div>
           </div>
           <div class="card">
-            <div class="ctitle"><div class="ib" style="background:#fff8e6;color:#b46d00"><svg class="i"><use href="#i-board"/></svg></div><div><h2>大屏上的留言</h2><div class="sub">自己的留言自己删，班主任能删全部</div></div></div>
+            <div class="ctitle"><div class="ib" style="background:#fff8e6;color:#b46d00"><svg class="i"><use href="#i-board"/></svg></div><div><h2>大屏上的留言</h2><div class="sub">点一下修改；自己的留言自己改，班主任能改全部</div></div></div>
             <div id="ntList"></div>
           </div>
         </div>
@@ -1431,11 +1433,10 @@ async function loadHomework() {
     $('#hwHint').textContent = r.total > limit ? `已超出 ${r.total - limit} 分钟，建议和科任老师协调` : r.items.length ? `共 ${r.items.length} 科` : '';
     const hwRow = (h, assigned) => {
       const c = SUBJ_COLOR[h.subject] || '#3b9cf5';
-      return `<div class="item"><span class="subj" style="background:${c}1a;color:${c}">${esc(h.subject)}</span>
+      return `<div class="item" ${h.can_edit ? `data-edithw="${h.id}" style="cursor:pointer"` : ''}><span class="subj" style="background:${c}1a;color:${c}">${esc(h.subject)}</span>
         <div class="main"><div class="txt" style="margin:0;font-weight:600">${esc(h.content)}</div>
         <div class="meta">${assigned ? `<span>${ic('cal', 'sm')}${esc(dayLabel(h.date, r.today))}布置</span>` : ''}${h.minutes ? `<span>${ic('clock', 'sm')}${h.minutes} 分钟</span>` : ''}${h.due ? `<span>${ic('cal', 'sm')}${esc(h.due)}</span>` : ''}<span>${ic('user', 'sm')}${esc(h.teacher)}</span></div>
-        ${h.due_date === r.today ? collectLine(h) : `<div style="margin-top:8px;font-size:13px"><span class="tag st-expired">收交：${esc(dayLabel(h.due_date, r.today))}课代表登记</span></div>`}</div>
-        ${assigned ? '' : `<button class="btn ghost sm" data-delhw="${h.id}" title="删除">${ic('trash', 'sm')}</button>`}</div>`;
+        ${h.due_date === r.today ? collectLine(h) : `<div style="margin-top:8px;font-size:13px"><span class="tag st-expired">收交：${esc(dayLabel(h.due_date, r.today))}课代表登记</span></div>`}</div></div>`;
     };
     hwItems = r.items.concat(r.due || []);
     $('#hwList').innerHTML = r.items.map(h => hwRow(h, false)).join('') || empty('今天还没有布置作业');
@@ -1458,17 +1459,31 @@ async function loadNotes() {
   $('#ntSubjects').innerHTML = [['', '不写科目'], ...subjOf().map(x => [x, x])].map(([v, t]) => `<button class="chip ${v === S.ntSubject ? 'on' : ''}" data-ntsubj="${esc(v)}">${esc(t)}</button>`).join('');
   $('#ntKeep').innerHTML = NT_KEEP.map(([v, t]) => `<button class="chip ${v === S.ntKeep ? 'on' : ''}" data-ntkeep="${v}">${t}</button>`).join('');
   const until = d => d ? `显示到 ${+d.slice(5, 7)}/${+d.slice(8)}` : '一直显示';
-  $('#ntList').innerHTML = r.items.map(n => `<div class="item"><span class="subj" style="background:#fff3d6;color:#b46d00">${esc(n.subject || '留言')}</span>
+  ntItems = r.items;
+  $('#ntList').innerHTML = r.items.map(n => `<div class="item" ${n.can_delete ? `data-editnt="${n.id}" style="cursor:pointer"` : ''}><span class="subj" style="background:#fff3d6;color:#b46d00">${esc(n.subject || '留言')}</span>
       <div class="main"><div class="txt" style="margin:0;font-weight:600;word-break:normal;overflow-wrap:break-word">${esc(n.text)}</div>
-      <div class="meta"><span>${ic('user', 'sm')}${esc(n.teacher)}</span><span>${ic('cal', 'sm')}${until(n.until)}</span></div></div>
-      ${n.can_delete ? `<button class="btn ghost sm" data-ntdel="${n.id}" title="删除">${ic('trash', 'sm')}</button>` : ''}</div>`).join('')
+      <div class="meta"><span>${ic('user', 'sm')}${esc(n.teacher)}</span><span>${ic('cal', 'sm')}${until(n.until)}</span></div></div></div>`).join('')
     || '<div class="me">大屏上现在没有留言</div>';
 }
+let ntItems = [];
 async function addNote() {
   const text = $('#ntText').value.trim();
   if (!text) return toast('请填写留言内容');
-  try { await api('/api/notes/add', { class: S.cls, text, subject: S.ntSubject, keep: S.ntKeep }); toast('已发布，大屏一分钟内显示 ✓'); $('#ntText').value = ''; loadNotes(); }
-  catch (e) { toast(e.message); }
+  try {
+    if (S.ntEdit) { await api('/api/notes/edit', { id: S.ntEdit, text, subject: S.ntSubject, keep: S.ntKeep }); toast('已修改，大屏一分钟内更新 ✓'); editNote(null); }
+    else { await api('/api/notes/add', { class: S.cls, text, subject: S.ntSubject, keep: S.ntKeep }); toast('已发布，大屏一分钟内显示 ✓'); $('#ntText').value = ''; }
+    loadNotes();
+  } catch (e) { toast(e.message); }
+}
+function editNote(n) {  // 修改：填回上面的输入框；null = 不改了
+  S.ntEdit = n ? n.id : null;
+  $('#ntText').value = n ? n.text : '';
+  S.ntSubject = n ? n.subject || '' : ''; S.ntKeep = !n ? 'week' : !n.until ? 'forever' : n.until === new Date().toLocaleDateString('sv-SE', BJ) ? 'today' : 'week';
+  $$('[data-ntsubj]').forEach(b => b.classList.toggle('on', b.dataset.ntsubj === S.ntSubject));
+  $$('[data-ntkeep]').forEach(b => b.classList.toggle('on', b.dataset.ntkeep === S.ntKeep));
+  $('#ntAdd').lastChild.textContent = n ? '保存修改' : '发布到大屏';
+  $('#ntEditBar').classList.toggle('hidden', !n);
+  if (n) { $('#ntText').scrollIntoView({ behavior: 'smooth', block: 'center' }); $('#ntText').focus(); }
 }
 
 // ---------- 早读 ----------
@@ -1517,11 +1532,31 @@ async function addHomework() {
   if (!content) return toast('请填写作业内容');
   const minutes = +$('#hwMinCustom').value || S.minutes;
   try {
-    await api('/api/homework/add', { class: S.cls, subject: S.subject, content, minutes, due: S.due,
-      push: $('#hwPush').checked, voice: $('#hwVoice').checked, ...voiceOpts() });
-    toast($('#hwPush').checked ? '已布置并推送到大屏 ✓' : '已布置 ✓');
-    $('#hwContent').value = ''; loadHomework();
+    if (S.hwEdit) {
+      await api('/api/homework/edit', { id: S.hwEdit, subject: S.subject, content, minutes, due: S.due });
+      toast('已修改，大屏一分钟内更新 ✓'); editHomework(null);
+    } else {
+      await api('/api/homework/add', { class: S.cls, subject: S.subject, content, minutes, due: S.due,
+        push: $('#hwPush').checked, voice: $('#hwVoice').checked, ...voiceOpts() });
+      toast($('#hwPush').checked ? '已布置并推送到大屏 ✓' : '已布置 ✓');
+      $('#hwContent').value = '';
+    }
+    loadHomework();
   } catch (e) { toast(e.message); }
+}
+function editHomework(h) {  // 修改：填回左边的表单；null = 不改了（科目回到自己常用的）
+  S.hwEdit = h ? h.id : null;
+  $('#hwContent').value = h ? h.content : '';
+  $('#hwMinCustom').value = '';
+  if (h) {
+    S.subject = h.subject; S.due = h.due;
+    if ([10, 20, 30, 45, 60, 90].includes(h.minutes)) S.minutes = h.minutes; else $('#hwMinCustom').value = h.minutes || '';
+  } else S.subject = store.get('cc_subject') || S.subject;
+  syncChips();
+  $('#hwAdd').lastChild.textContent = h ? '保存修改' : '布置';
+  $('#hwPushBox').classList.toggle('hidden', !!h);
+  $('#hwEditBar').classList.toggle('hidden', !h);
+  if (h) { $('#hwContent').scrollIntoView({ behavior: 'smooth', block: 'center' }); $('#hwContent').focus(); }
 }
 
 // ---------- 提醒 ----------
@@ -2096,11 +2131,15 @@ document.addEventListener('click', async e => {
   const sj = t.closest('[data-subj]'); if (sj) { S.subject = sj.dataset.subj; store.set('cc_subject', S.subject); return syncChips(); }
   const mn = t.closest('[data-min]'); if (mn) { S.minutes = +mn.dataset.min; $('#hwMinCustom').value = ''; return syncChips(); }
   const du = t.closest('[data-due]'); if (du) { S.due = du.dataset.due; return syncChips(); }
-  const dh = t.closest('[data-delhw]');
   const ns = t.closest('[data-ntsubj]'); if (ns) { S.ntSubject = ns.dataset.ntsubj; $$('[data-ntsubj]').forEach(b => b.classList.toggle('on', b === ns)); return; }
   const nk = t.closest('[data-ntkeep]'); if (nk) { S.ntKeep = nk.dataset.ntkeep; $$('[data-ntkeep]').forEach(b => b.classList.toggle('on', b === nk)); return; }
   const fd = t.closest('[data-filedel]'); if (fd) { if (!confirm('删除这个文件？已经下载到一体机上的不受影响。')) return; try { await api('/api/files/delete', { id: fd.dataset.filedel }); loadFiles(); } catch (err) { toast(err.message); } return; }
-  const nd = t.closest('[data-ntdel]'); if (nd) { if (!confirm('删除这条留言？')) return; try { await api('/api/notes/delete', { id: +nd.dataset.ntdel }); loadNotes(); } catch (err) { toast(err.message); } return; }
+  const en = !t.closest('button, input, label') && t.closest('[data-editnt]'); if (en) return editNote(ntItems.find(n => n.id === +en.dataset.editnt));
+  if (t.closest('#ntCancel')) return editNote(null);
+  if (t.closest('#ntDel') && S.ntEdit) { if (!confirm('删除这条留言？')) return; try { await api('/api/notes/delete', { id: S.ntEdit }); editNote(null); loadNotes(); } catch (err) { toast(err.message); } return; }
+  const eh = !t.closest('button, input, label') && t.closest('[data-edithw]'); if (eh) return editHomework(hwItems.find(h => h.id === +eh.dataset.edithw));
+  if (t.closest('#hwCancel')) return editHomework(null);
+  if (t.closest('#hwDel') && S.hwEdit) { if (!confirm('删除这条作业？')) return; try { await api('/api/homework/delete', { id: S.hwEdit }); editHomework(null); loadHomework(); } catch (err) { toast(err.message); } return; }
   const md = t.closest('[data-mrday]'); if (md) { S.mrDay = +md.dataset.mrday; return loadMorning(); }
   const ms = t.closest('[data-mrsubj]'); if (ms) { S.mrSubject = ms.dataset.mrsubj; $$('[data-mrsubj]').forEach(b => b.classList.toggle('on', b === ms)); return; }
   const exc = t.closest('[data-excls]'); if (exc) { const c = exc.dataset.excls; S.exClasses.has(c) ? S.exClasses.delete(c) : S.exClasses.add(c); exc.classList.toggle('on', S.exClasses.has(c)); return; }
@@ -2110,7 +2149,6 @@ document.addEventListener('click', async e => {
   const exn = t.closest('[data-exend]'); if (exn) { if (!confirm('提前结束这一场？大屏会马上收起考试画面。')) return;
     const [id, idx] = exn.dataset.exend.split(':').map(Number); try { await api('/api/exams/end', { id, idx, class: S.cls }); toast('已结束，大屏几秒内收起'); if (S.exams) loadExamBoard(); refresh(); } catch (err) { toast(err.message); } return; }
   const mdel = t.closest('[data-mrdel]'); if (mdel) { if (!confirm('删除这条早读内容？')) return; try { await api('/api/morning/delete', { id: +mdel.dataset.mrdel }); loadMorning(); } catch (err) { toast(err.message); } return; }
-  if (dh) { if (!confirm('删除这条作业？')) return; try { await api('/api/homework/delete', { id: +dh.dataset.delhw }); loadHomework(); } catch (err) { toast(err.message); } return; }
   const cs = t.closest('[data-cstart]');
   if (cs) { try { await api('/api/collect/start', { class: S.cls, hw_id: +cs.dataset.cstart }); toast('已通知大屏，课代表点"开始登记"即可（上课中会下课后弹出）'); } catch (err) { toast(err.message); } return; }
   const cr = t.closest('[data-cremind]');
@@ -2198,7 +2236,7 @@ document.addEventListener('input', e => {
 });
 $('#clsSel').onchange = () => {
   if ($('#clsSel').value === '__manage__') { $('#clsSel').value = S.cls; return openClasses(); }
-  if ($('#clsSel').value === '__register__') { $('#clsSel').value = S.cls; location.href = '/register'; return; } S.cls = $('#clsSel').value; renderNav(); store.set('cc_cls', S.cls); S.student = null; go(S.view); refresh(); };
+  if ($('#clsSel').value === '__register__') { $('#clsSel').value = S.cls; location.href = '/register'; return; } S.cls = $('#clsSel').value; if (S.hwEdit) editHomework(null); if (S.ntEdit) editNote(null); renderNav(); store.set('cc_cls', S.cls); S.student = null; go(S.view); refresh(); };
 let qTimer;
 $('#qText').addEventListener('input', () => { clearTimeout(qTimer); qTimer = setTimeout(quickParse, 350); });
 const quickGo = () => { if (S.sending) return; clearTimeout(qTimer); quickParse(); if (atTime() && S.remDays.length) return saveTimed(); if (S.intent && !['call', 'notice'].includes(S.intent.type)) return runIntent(); if (!$('#sendBtn').disabled) send(); };
