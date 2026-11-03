@@ -752,6 +752,7 @@
               <div class="row" style="margin-top:12px;flex-wrap:wrap"><span class="me">什么时候自动出现</span>
                 <div class="chips"><button class="chip" data-sbmode="evening">只在晚自习</button><button class="chip" data-sbmode="breaks">只在白天课间</button><button class="chip" data-sbmode="both">晚自习和课间</button></div></div>
               <label class="switch" style="margin-top:10px;display:flex"><input type="checkbox" id="sbTools" checked><span class="track"></span>屏幕右边显示「工具」小把手（在大屏上直接点计时、抽号）</label>
+              <label class="switch" style="margin-top:10px;display:flex"><input type="checkbox" id="sbDesk"><span class="track"></span>桌面上一直放一个小看板（在桌面右侧；打开 PPT 等窗口时被盖住）</label>
               <label class="switch" style="margin-top:10px"><input type="checkbox" id="sbStars" checked><span class="track"></span>待机页显示"本周之星"（积分前 5 名，不显示后几名）</label>
               <div class="row" style="margin-top:12px;flex-wrap:wrap"><span class="me">无人操作</span><div class="chips" id="sbIdle"></div><span class="me">分钟后显示</span></div>
               <div class="row" style="margin-top:12px"><span class="me">大屏字体</span>
@@ -1700,6 +1701,7 @@ async function loadBoard() {
   $('#sbOn').checked = !!sb.enabled;
   $('#sbStars').checked = S.settings.board_points !== false;
   $('#sbTools').checked = S.settings.tools_tab !== false;
+  $('#sbDesk').checked = !!S.settings.desk_board;
   $('#sbIdle').innerHTML = [3, 5, 10, 15].map(m => `<button class="chip" data-sbidle="${m}">${m}</button>`).join('');
   syncBoardChips();
   renderCd(S.settings.countdowns || []); renderBoardPreview(); renderTimetable();
@@ -1750,6 +1752,10 @@ $('#sbTools').addEventListener('change', async () => {  // 开关一拨就保存
   try { await api('/api/settings', { class: S.cls, tools_tab: $('#sbTools').checked }); toast($('#sbTools').checked ? '大屏右边会显示「工具」把手 ✓' : '已关掉大屏「工具」把手 ✓'); }
   catch (e) { toast(e.message); }
 });
+$('#sbDesk').addEventListener('change', async () => {
+  try { await api('/api/settings', { class: S.cls, desk_board: $('#sbDesk').checked }); toast($('#sbDesk').checked ? '大屏桌面右侧会放一个小看板 ✓ 一分钟内出现' : '已撤掉桌面小看板 ✓'); }
+  catch (e) { toast(e.message); }
+});
 $('#epSave').onclick = async () => {
   const plan = readPlan(); if (!plan) return;
   try { await api('/api/settings', { class: S.cls, eve_plan: plan }); toast(plan.length ? '时间安排已保存，大屏一分钟内更新 ✓' : '时间安排已撤掉 ✓'); }
@@ -1758,7 +1764,7 @@ $('#epSave').onclick = async () => {
 async function saveBoard() {
   const plan = readPlan(); if (!plan) return;
   try { await api('/api/settings', { class: S.cls, countdowns: readCd(), eve_plan: plan,
-      standby: { enabled: $('#sbOn').checked, idle_minutes: S.sbIdle, mode: S.sbMode }, screen_font: S.sfont, board_points: $('#sbStars').checked, tools_tab: $('#sbTools').checked,
+      standby: { enabled: $('#sbOn').checked, idle_minutes: S.sbIdle, mode: S.sbMode }, screen_font: S.sfont, board_points: $('#sbStars').checked, tools_tab: $('#sbTools').checked, desk_board: $('#sbDesk').checked,
       quotes: { enabled: $('#qtOn').checked, builtin: $('#qtBuiltin').checked, custom: $('#qtCustom').value.split('\n') }, prep: prepBody() }); toast('已保存 ✓'); loadBoard(); }
   catch (e) { toast(e.message); }
 }

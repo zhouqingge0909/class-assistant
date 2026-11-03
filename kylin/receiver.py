@@ -250,10 +250,9 @@ def uninstall_self():
         set_cron(None)
     names = ("作业登记", "考勤登记", "班级看板")
     if WIN:
-        buf = ctypes.create_unicode_buffer(260)
-        startup = buf.value if ctypes.windll.shell32.SHGetFolderPathW(None, 0x07, None, 0, buf) == 0 else ""  # CSIDL_STARTUP
+        set_win_run(False)
         desk = win_desktop()
-        paths = [os.path.join(startup, "班级助手接收端.lnk")] + [os.path.join(desk, n + (".lnk" if n == "班级看板" else ".url")) for n in names]
+        paths = [win_startup_lnk()] + [os.path.join(desk, n + (".lnk" if n == "班级看板" else ".url")) for n in names]
     else:
         paths = [os.path.expanduser("~/.config/autostart/classcall.desktop")]
         paths += [os.path.join(os.path.expanduser(d), n + ".desktop") for d in ("~/桌面", "~/Desktop") for n in names]
@@ -321,14 +320,82 @@ def set_cron(line):
             log(f"设置开机备用入口失败（不影响使用）：{e}")
 
 
+# ---------------- 开机自启看护（Windows）----------------
+# Windows 的开机自启是「启动」文件夹里的 班级助手接收端.lnk，会被 360 之类的清理软件删掉（11-03 网友那边两台）。
+# 同样每分钟看一眼，没了就补回；另在注册表 HKCU\...\Run 里登记一个备用入口（不用管理员）。两个都起来时，后起的那个拿不到锁自己退出。
+RUN_KEY, RUN_NAME = r"Software\Microsoft\Windows\CurrentVersion\Run", "ClassCallReceiver"
+
+
+def win_startup_lnk():
+    buf = ctypes.create_unicode_buffer(260)
+    d = buf.value if ctypes.windll.shell32.SHGetFolderPathW(None, 0x07, None, 0, buf) == 0 else ""  # CSIDL_STARTUP
+    return os.path.join(d, "班级助手接收端.lnk") if d else ""
+
+
+def win_pythonw():
+    w = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    return w if os.path.isfile(w) else sys.executable
+
+
+def ensure_win_autostart():
+    lnk = win_startup_lnk()
+    if not lnk or os.path.isfile(lnk):
+        return
+    try:
+        d = os.path.dirname(lnk)
+        if os.path.isdir(d):
+            left = os.listdir(d)
+            log(f"发现开机自启被删了：「启动」文件夹最后修改于 {time.strftime('%m-%d %H:%M', time.localtime(os.path.getmtime(d)))}，"
+                f"里面还剩 {len(left)} 个文件{('：' + '、'.join(left[:8])) if left else ''}")
+        os.makedirs(d, exist_ok=True)
+        q = lambda x: x.replace("'", "''")  # PowerShell 单引号字符串里的 ' 要写两遍
+        ps = (f"$l=(New-Object -ComObject WScript.Shell).CreateShortcut('{q(lnk)}');$l.TargetPath='{q(win_pythonw())}';"
+              f"$l.Arguments='\"{q(SELF)}\"';$l.WorkingDirectory='{q(HERE)}';$l.Save()")
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+                       capture_output=True, timeout=60, creationflags=0x08000000)
+        log("已补回开机自启" if os.path.isfile(lnk) else "补回开机自启失败（可能被杀毒软件拦了），注册表里的备用入口还在")
+    except Exception as e:
+        log(f"补回开机自启失败：{e}")
+
+
+def set_win_run(on):
+    """注册表 Run 里的备用入口：on=True 没有就写上，False 删掉"""
+    try:
+        import winreg
+        cmd = f'"{win_pythonw()}" "{SELF}"'
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as k:
+            try:
+                cur = winreg.QueryValueEx(k, RUN_NAME)[0]
+            except OSError:
+                cur = None
+            if not on:
+                if cur is not None:
+                    winreg.DeleteValue(k, RUN_NAME)
+                return
+            if cur == cmd:
+                return
+            winreg.SetValueEx(k, RUN_NAME, 0, winreg.REG_SZ, cmd)
+            log("开机备用入口（注册表）不见了，已补回" if getattr(set_win_run, "done", False) else "已设置开机备用入口（注册表 Run）")
+            set_win_run.done = True
+    except Exception as e:
+        if on and not getattr(set_win_run, "failed", False):
+            set_win_run.failed = True
+            log(f"设置开机备用入口失败（不影响使用）：{e}")
+
+
 def guard_loop():
-    if WIN or os.path.basename(HERE) != ".classcall":  # 手动从别处运行（比如测试）时不动开机设置
+    if os.path.basename(HERE) != ".classcall":  # 手动从别处运行（比如测试）时不动开机设置
         return
     n = 0
     while not UNINSTALLING.is_set():
-        ensure_autostart()
-        if n % 10 == 0:  # crontab 要开子进程，十分钟看一次
-            set_cron(CRON_LINE)
+        if WIN:
+            ensure_win_autostart()
+            if n % 10 == 0:
+                set_win_run(True)
+        else:
+            ensure_autostart()
+            if n % 10 == 0:  # crontab 要开子进程，十分钟看一次
+                set_cron(CRON_LINE)
         n += 1
         UNINSTALLING.wait(60)
 
@@ -1309,21 +1376,129 @@ class Standby:
             pass
 
 
+class DeskLayer:
+    """桌面版看板的窗口：贴在桌面上、压在所有窗口下面、不抢焦点、不进任务栏；被"显示桌面"收起来了就自己再显示"""
+    ALPHA = 0.93
+
+    @staticmethod
+    def box(app):
+        """放在哪：桌面右侧，避开任务栏"""
+        top, bottom = 0, app.sh
+        if WIN:
+            try:
+                r = (ctypes.c_long * 4)()
+                if ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(r), 0):  # SPI_GETWORKAREA
+                    top, bottom = r[1], r[3]
+            except Exception:
+                pass
+        else:
+            top, bottom = int(app.sh * 0.03), int(app.sh * 0.93)  # 麒麟任务栏一般在下面，留出来
+        m = int(app.sh * 0.025)
+        w, h = int(app.sw * 0.48), bottom - top - 2 * m
+        return app.sw - w - m, top + m, w, h
+
+    @staticmethod
+    def setup(win, box):
+        x, y, w, h = box
+        if WIN:
+            win.overrideredirect(True)
+            win.geometry(f"{w}x{h}+{x}+{y}")
+            try:
+                win.attributes("-alpha", DeskLayer.ALPHA)
+                u = ctypes.windll.user32
+                win.update_idletasks()
+                hwnd = u.GetParent(win.winfo_id()) or win.winfo_id()
+                GWL_EXSTYLE, WS_EX_TOOLWINDOW, WS_EX_NOACTIVATE, WS_EX_APPWINDOW = -20, 0x80, 0x08000000, 0x40000
+                u.SetWindowLongW(hwnd, GWL_EXSTYLE, (u.GetWindowLongW(hwnd, GWL_EXSTYLE) | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) & ~WS_EX_APPWINDOW)
+                progman = u.FindWindowW("Progman", None)  # 让桌面当它的"主人"：按 Win+D 显示桌面时它还在
+                if progman:
+                    setp = getattr(u, "SetWindowLongPtrW", u.SetWindowLongW)
+                    setp.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+                    setp(hwnd, -8, progman)  # GWLP_HWNDPARENT
+                win._desk_hwnd = hwnd
+            except Exception as e:
+                log(f"桌面看板窗口设置失败：{e}")
+        else:
+            win.withdraw()  # 先藏起来，写好"不要边框、放最下面、不进任务栏"再显示，窗口管理器才认
+            win.geometry(f"{w}x{h}+{x}+{y}")
+            win.update_idletasks()
+            try:
+                DeskLayer.x11_hints(win)
+            except Exception as e:
+                log(f"桌面看板窗口设置失败：{e}")
+            win.deiconify()
+            win.geometry(f"{w}x{h}+{x}+{y}")
+            try:
+                win.attributes("-alpha", DeskLayer.ALPHA)
+            except tk.TclError:
+                pass
+        DeskLayer.keep(win)
+
+    @staticmethod
+    def x11_hints(win):
+        x11 = ctypes.cdll.LoadLibrary(ctypes.util.find_library("X11") or "libX11.so.6")
+        x11.XOpenDisplay.restype = ctypes.c_void_p
+        x11.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+        x11.XInternAtom.restype = ctypes.c_ulong
+        x11.XChangeProperty.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_int, ctypes.c_int,
+                                        ctypes.c_void_p, ctypes.c_int]
+        x11.XFlush.argtypes = [ctypes.c_void_p]
+        x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        dpy = x11.XOpenDisplay(None)
+        if not dpy:
+            return
+        A = lambda n: x11.XInternAtom(dpy, n.encode(), 0)
+        xid = int(win.wm_frame(), 16)  # Tk 外层窗口（窗口管理器看的是它）
+        XA_ATOM = 4
+        states = (ctypes.c_ulong * 4)(*[A(n) for n in ("_NET_WM_STATE_BELOW", "_NET_WM_STATE_SKIP_TASKBAR",
+                                                     "_NET_WM_STATE_SKIP_PAGER", "_NET_WM_STATE_STICKY")])
+        x11.XChangeProperty(dpy, xid, A("_NET_WM_STATE"), XA_ATOM, 32, 0, states, 4)
+        utype = (ctypes.c_ulong * 1)(A("_NET_WM_WINDOW_TYPE_UTILITY"))
+        x11.XChangeProperty(dpy, xid, A("_NET_WM_WINDOW_TYPE"), XA_ATOM, 32, 0, utype, 1)
+        motif = (ctypes.c_ulong * 5)(2, 0, 0, 0, 0)  # _MOTIF_WM_HINTS：不要标题栏和边框
+        x11.XChangeProperty(dpy, xid, A("_MOTIF_WM_HINTS"), A("_MOTIF_WM_HINTS"), 32, 0, motif, 5)
+        x11.XFlush(dpy)
+        x11.XCloseDisplay(dpy)
+
+    @staticmethod
+    def keep(win):
+        """每隔几秒：被收起来了就再显示，并放回最下面（不激活、不抢焦点）"""
+        try:
+            if WIN:
+                u, hwnd = ctypes.windll.user32, getattr(win, "_desk_hwnd", None)
+                if not hwnd:
+                    return
+                if not u.IsWindowVisible(hwnd) or u.IsIconic(hwnd):
+                    u.ShowWindow(hwnd, 4)  # SW_SHOWNOACTIVATE
+                u.SetWindowPos(hwnd, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)  # HWND_BOTTOM，不移动、不改大小、不激活
+            else:
+                if win.state() != "normal":
+                    win.deiconify()
+                win.lower()
+        except Exception:
+            pass
+
+
 class DayStandby:
     """白天版班级看板（浅色）：今天的课程、现在/下节课、今日作业、倒计时"""
     BG1, BG2, CARD, LINE, GREEN, GREEN_SOFT = "#f3f8fc", "#eaf6ef", "#ffffff", "#e3e9f0", "#16a571", "#e7f7f0"
 
-    def __init__(self, app, board):
-        self.app, self.board = app, board
-        sw, sh = app.sw, app.sh
+    def __init__(self, app, board, desk=None):
+        """desk=(x, y, 宽, 高)：桌面版小看板——同样的画法缩小放在桌面右侧，压在所有窗口下面，不用碰屏幕收起"""
+        self.app, self.board, self.desk = app, board, desk
+        sw, sh = (desk[2], desk[3]) if desk else (app.sw, app.sh)
         self.win = tk.Toplevel(app.root)
-        self.win.overrideredirect(True)
-        self.win.attributes("-topmost", True)
-        self.win.geometry(f"{sw}x{sh}+0+0")
-        float_window(self.win)
+        if desk:
+            DeskLayer.setup(self.win, desk)
+        else:
+            self.win.overrideredirect(True)
+            self.win.attributes("-topmost", True)
+            self.win.geometry(f"{sw}x{sh}+0+0")
+            float_window(self.win)
         cv = self.cv = tk.Canvas(self.win, width=sw, height=sh, highlightthickness=0, bg=self.BG1)
         cv.pack()
-        cv.bind("<Button-1>", lambda e: app.hide_standby())
+        if not desk:
+            cv.bind("<Button-1>", lambda e: app.hide_standby())
         u = self.u = sh / 100
         F = self.F = lambda px, b=True: app.font(int(px * u), b)
         gradient(cv, 0, 0, sw, sh, self.BG1, self.BG2, steps=100)
@@ -1344,8 +1519,10 @@ class DayStandby:
         # 今天的课程表（一排）
         self.tiles_top, self.cur_no = 29 * u, None
         cv.create_text(L, self.tiles_top + 1 * u, text="今天的课程", anchor="w", fill=MUTED, font=F(2.2))
-        # 下半：今日作业 + 倒计时/公告
-        top, quote = self.tiles_top + 22 * u, board.get("quote")
+        # 下半：今日作业 + 倒计时/公告（桌面版地方窄，课程排两行、不放每日一句）
+        n_cls = len([c for c in board.get("classes_today") or [] if c.get("subject")] or board.get("classes_today") or [])
+        self.rows = 2 if desk and n_cls > 6 else 1
+        top, quote = self.tiles_top + (22 if self.rows == 1 else 27) * u, None if desk else board.get("quote")
         bottom = sh - (12 if quote else 6) * u
         mid = sw * 0.62
         round_rect(cv, L, top, mid - 1.2 * u, bottom, 3 * u, fill=self.CARD, width=0)
@@ -1370,8 +1547,13 @@ class DayStandby:
         rx, y = mid + 1.2 * u, top
         for c in (board.get("countdowns") or [])[:2]:
             round_rect(cv, rx, y, R, y + 11 * u, 3 * u, fill=self.CARD, width=0)
-            cv.create_text(rx + 3 * u, y + 5.5 * u, text=f"距{c['name']}", anchor="w", fill=MUTED, font=F(2.4))
-            cv.create_text(R - 7 * u, y + 5.5 * u, text=str(c["days"]), anchor="e", fill="#ef5a5a", font=app.font(int(6 * u), True, digits=True))
+            f_n = app.font(int(6 * u), True, digits=True)
+            room = R - 7 * u - f_n.measure(str(c["days"])) - 1.5 * u - (rx + 3 * u)  # 名字长了（如"冬季运动会"）就把字缩小，别压到天数
+            name, px = f"距{c['name']}", 2.4
+            while px > 1.7 and F(px).measure(name) > room:
+                px -= 0.1
+            cv.create_text(rx + 3 * u, y + 5.5 * u, text=name, anchor="w", fill=MUTED, font=F(px))
+            cv.create_text(R - 7 * u, y + 5.5 * u, text=str(c["days"]), anchor="e", fill="#ef5a5a", font=f_n)
             cv.create_text(R - 3 * u, y + 6.3 * u, text="天", anchor="e", fill=MUTED, font=F(2.2))
             y += 12.4 * u
         msgs = board_msgs(board)
@@ -1398,8 +1580,9 @@ class DayStandby:
             cv.create_text(x0, qy, text=quote["text"], anchor="w", fill="#2f4a6b", font=f_q)
             if by:
                 cv.create_text(x0 + wq + 2 * u, qy + 0.3 * u, text=by, anchor="w", fill=MUTED, font=f_b)
-        cv.create_text(sw / 2, sh - 2.6 * u, text="轻触屏幕返回", fill="#a3afbf", font=F(1.8, False))
-        app.fade_in(self.win)
+        if not desk:
+            cv.create_text(sw / 2, sh - 2.6 * u, text="轻触屏幕返回", fill="#a3afbf", font=F(1.8, False))
+            app.fade_in(self.win)
         self.tick()
 
     def draw_tiles(self, classes, cur_no, hm):
@@ -1408,18 +1591,19 @@ class DayStandby:
         classes = [c for c in classes if c.get("subject")] or classes
         if not classes:
             return
-        n, gap = len(classes), 1 * u
-        w, y1 = (R - L - gap * (n - 1)) / n, self.tiles_top + 4 * u
+        gap, rows = 1 * u, self.rows
+        per = -(-len(classes) // rows)  # 每行几节
+        w, th = (R - L - gap * (per - 1)) / per, (14 if rows == 1 else 10.5) * u
         for k, c in enumerate(classes):
-            x1 = L + k * (w + gap)
+            x1, y1 = L + (k % per) * (w + gap), self.tiles_top + 4 * u + (k // per) * (th + gap)
             now, past = c["no"] == cur_no, c["end"] <= hm
             fill = self.GREEN if now else "#f6f8fb" if past else self.CARD
-            round_rect(cv, x1, y1, x1 + w, y1 + 14 * u, 2.2 * u, fill=fill, width=0, tags="tiles")
+            round_rect(cv, x1, y1, x1 + w, y1 + th, 2.2 * u, fill=fill, width=0, tags="tiles")
             ink, sub = ("#ffffff", "#d6f5e8") if now else ("#b3bdca", "#c4ccd6") if past else (INK, MUTED)
-            cv.create_text(x1 + w / 2, y1 + 3 * u, text=f"{c['no']}  {c['start']}", fill=sub, font=self.F(1.8, False), tags="tiles")
+            cv.create_text(x1 + w / 2, y1 + th * 0.22, text=f"{c['no']}  {c['start']}", fill=sub, font=self.F(1.8, False), tags="tiles")
             subj = c.get("subject") or "—"
             color = "#ffffff" if now else "#c4ccd6" if past else SUBJ_COLOR.get(subj, INK)
-            cv.create_text(x1 + w / 2, y1 + 9 * u, text=subj, fill=color, font=self.F(3.6), tags="tiles")
+            cv.create_text(x1 + w / 2, y1 + th * 0.64, text=subj, fill=color, font=self.F(3.6 if rows == 1 else 3.2), tags="tiles")
 
     def tick(self):
         cv = self.cv
@@ -1453,6 +1637,8 @@ class DayStandby:
         if key != self.cur_no:
             self.cur_no = key
             self.draw_tiles(classes, cur["no"] if cur else None, hm)
+        if self.desk and t.tm_sec % 3 == 0:
+            DeskLayer.keep(self.win)
         self.win.after(1000, self.tick)
 
     def close(self):
@@ -1902,6 +2088,7 @@ class App:
         self.in_class = False
         self.board = {}
         self.standby = None
+        self.deskb = self.desk_sig = None
         self.standby_forced = False
         self.standby_at = 0
         self.morning = None  # 早读页
@@ -2230,11 +2417,30 @@ class App:
         elif self.tooltab:
             self.tooltab.lift()  # 保持在最前面（例如正在放 PPT）
 
+    def sync_desk(self):
+        """桌面版看板：工作台打开了就一直放在桌面上；作业、课表、留言变了就重画"""
+        want = bool(self.board.get("desk_board"))
+        sig = board_sig(self.board) + json.dumps([self.board.get(k) for k in ("date", "classes_today")]) if want else None
+        if self.deskb and (sig != self.desk_sig or not self.deskb.win.winfo_exists()):
+            self.deskb.close()
+            self.deskb = None
+            if not want:
+                log("桌面看板已关掉")
+        if want and not self.deskb:
+            self.deskb = DayStandby(self, self.board, desk=DeskLayer.box(self))
+            if self.desk_sig is None:
+                log("显示桌面看板")
+        self.desk_sig = sig
+
     def check_standby(self):
         try:
             self.sync_tooltab()
         except Exception as e:
             log(f"工具把手出错：{e}")
+        try:
+            self.sync_desk()
+        except Exception as e:
+            log(f"桌面看板出错：{e}")
         try:
             self.check_exam()
         except Exception as e:

@@ -1187,7 +1187,7 @@ def ccfg(cls):
     q = settings.get("quotes", {})
     base = {"countdowns": settings.get("countdowns", [{"name": "高考", "date": "2027-06-07"}]),
             "standby": settings.get("standby", {"enabled": True, "idle_minutes": 5}),
-            "screen_font": settings.get("screen_font", "wenkai"), "board_points": settings.get("board_points", True), "eve_plan": [], "tools_tab": True,
+            "screen_font": settings.get("screen_font", "wenkai"), "board_points": settings.get("board_points", True), "eve_plan": [], "tools_tab": True, "desk_board": False,
             "quotes": {"enabled": q.get("enabled", True), "builtin": q.get("builtin", True),
                        "custom": q.get("custom", {}).get(cls, [])}}
     own = settings.get("cls_cfg", {}).get(cls, {})
@@ -1420,6 +1420,12 @@ class Handler(BaseHTTPRequestHandler):
         r = self.role(cls)
         return r in ("admin", "head") or (level == "teacher" and r == "teacher")
 
+    def can_edit_exam(self, e):
+        """班主任（或管理员）能改删本班所有考试；任课老师只能改删自己建的"""
+        s = self.sess()
+        return all(self.allowed(c, "head") for c in e["classes"]) or bool(
+            s and e.get("uid") == s["uid"] and all(self.allowed(c, "teacher") for c in e["classes"]))
+
     def my_classes(self):
         return [c for c in load_students() if self.role(c)]
 
@@ -1450,10 +1456,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/files/delete":  # 自己发的自己删；班主任能删本班全部
             f = next((x for x in files if x["id"] == body.get("id")), None)
             return None if f and (self.allowed(f["class"], "head") or (s and f.get("uid") == s["uid"])) else "own"
-        if path in ("/api/exams/save", "/api/exams/delete"):  # 管理员可以一次发多个班；班主任只能管自己的班
+        if path in ("/api/exams/save", "/api/exams/delete"):  # 本班老师都能安排考试（任课老师也会安排监考）；改删：班主任全部、任课老师自己建的
             old = next((e for e in exams if e["id"] == body.get("id")), None)
             want = [str(c) for c in (body.get("classes") or [])] if path.endswith("save") else []
-            return None if all(self.allowed(c, "head") for c in want + (old["classes"] if old else [])) else "head"
+            if not all(self.allowed(c, "teacher") for c in want):
+                return "teacher"
+            return None if not old or self.can_edit_exam(old) else "own"
         if path == "/api/exams/end":  # 本班老师（如监考老师）都能提前结束
             return None if self.allowed(str(body.get("class") or ""), "teacher") else "teacher"
         if path == "/api/morning/delete":
@@ -1791,7 +1799,7 @@ class Handler(BaseHTTPRequestHandler):
                     continue  # 只列这个班的、还没考完的（考完一周内的也留着看）
                 live = {x["idx"]: x for x in exam_sessions(qcls) if x["exam_id"] == e["id"]}
                 items.append({"id": e["id"], "name": e["name"], "classes": e["classes"], "notice": e.get("notice", ""), "creator": e.get("creator", ""),
-                              "can_edit": all(self.allowed(c, "head") for c in e["classes"]),
+                              "can_edit": self.can_edit_exam(e),
                               "sessions": [{**x, "idx": i, "state": ("ended" if (e.get("ended") or {}).get(f"{qcls}|{i}") else
                                                                      "live" if i in live and live[i]["show_from"] <= now < live[i]["hide_at"] else
                                                                      "done" if x["date"] < d or (i in live and now >= live[i]["hide_at"]) else "todo")}
@@ -1821,7 +1829,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/settings":  # 只返回这个班的设置（形状和以前一样，前端不用大改）
             c = ccfg(qcls)
             return self.send_json({"countdowns": c["countdowns"], "standby": c["standby"], "screen_font": c["screen_font"],
-                                   "board_points": c["board_points"], "eve_plan": c["eve_plan"], "tools_tab": c["tools_tab"],
+                                   "board_points": c["board_points"], "eve_plan": c["eve_plan"], "tools_tab": c["tools_tab"], "desk_board": c["desk_board"],
                                    "quotes": {"enabled": c["quotes"]["enabled"], "builtin": c["quotes"]["builtin"],
                                               "custom": {qcls: c["quotes"]["custom"]}},
                                    "notices": {qcls: settings.get("notices", {}).get(qcls, "")},
@@ -3021,6 +3029,8 @@ class Handler(BaseHTTPRequestHandler):
                 own["board_points"] = bool(body["board_points"])
             if "tools_tab" in body:
                 own["tools_tab"] = bool(body["tools_tab"])
+            if "desk_board" in body:  # 桌面版看板：一直贴在桌面右侧
+                own["desk_board"] = bool(body["desk_board"])
             if isinstance(body.get("eve_plan"), list):  # 晚自习时间安排：每天都用这一份
                 plan = []
                 for it in body["eve_plan"]:
@@ -3137,7 +3147,7 @@ class Handler(BaseHTTPRequestHandler):
                         "notice": settings.get("notices", {}).get(cls, ""), "server_time": time.time(),
                         "notes": [{"by": note_by(n), "text": n["text"]} for n in notes_of(cls)],  # 各科老师的大屏留言
                         "standby": {**{"mode": "evening"}, **(cc["standby"] or {})}, "screen_font": cc["screen_font"] if q.get("fv") else "system",  # 旧版接收端认不出中文字体名会反复重启，只给新版发字体
-                        "standby_window": window, "evening": in_eve, "session": session, "eve_plan": cc["eve_plan"], "tools_tab": cc["tools_tab"],
+                        "standby_window": window, "evening": in_eve, "session": session, "eve_plan": cc["eve_plan"], "tools_tab": cc["tools_tab"], "desk_board": cc["desk_board"],
                         "classes_today": [c for c in today_classes(cls, dt)[0] if not c["evening"]],  # 白天看板只显示白天的课，晚自习的课在夜空看板上
                         "class_now": today_classes(cls, dt)[1], "class_next": today_classes(cls, dt)[2],
                         "duty": duty_today(cls, dt), "quote": pick_quote(cls),

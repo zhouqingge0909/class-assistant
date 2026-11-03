@@ -8,6 +8,7 @@ Start-Sleep 2
 $desk = [Environment]::GetFolderPath('Desktop')
 Remove-Item "$desk\作业登记.url", "$desk\考勤登记.url", "$desk\班级看板.lnk" -ErrorAction SilentlyContinue
 Remove-Item (Join-Path ([Environment]::GetFolderPath('Startup')) '班级助手接收端.lnk') -ErrorAction SilentlyContinue
+Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'ClassCallReceiver' -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $env:USERPROFILE '.classcall') -Recurse -Force -ErrorAction SilentlyContinue
 if (Test-Path (Join-Path $env:USERPROFILE '.classcall')) {
   Write-Host '× 程序文件夹没删干净，请重启电脑后再运行一次卸载命令' -ForegroundColor Red
