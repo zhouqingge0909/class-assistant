@@ -2110,7 +2110,7 @@ class Handler(BaseHTTPRequestHandler):
         if not want or settings.get("register_paused"):
             return self.send_json({"error": "暂未开放注册"}, 403)
         if not hmac.compare_digest(code.encode(), want.encode()):
-            return self.send_json({"error": "注册码不对，请看公众号自动回复里的最新注册码"}, 403)
+            return self.send_json({"error": "注册码不对，请向发给你链接的老师确认"}, 403)
         if not cls:
             return self.send_json({"error": "请填写班级名称"}, 400)
         if len(cls) > 16:
