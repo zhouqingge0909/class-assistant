@@ -195,6 +195,44 @@ $s.SetOutputToWaveFile($args[1], $f)
 $s.Speak([IO.File]::ReadAllText($args[2], [Text.Encoding]::UTF8))
 $s.Dispose()
 """
+# 有些 Windows 的中文语音只装在 OneCore 里，System.Speech 读不到，要用 SAPI 指定 OneCore 的语音目录
+ONECORE_PS = r"""$id = $args[0]
+$c = New-Object -ComObject SAPI.SpObjectTokenCategory
+$c.SetId('HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Speech_OneCore\Voices', $false)
+$t = $c.EnumerateTokens() | Where-Object { $_.Id -like ('*\' + $id) } | Select-Object -First 1
+if (-not $t) { exit 1 }
+$v = New-Object -ComObject SAPI.SpVoice
+$v.Voice = $t
+$v.Rate = -1
+$st = New-Object -ComObject SAPI.SpFileStream
+$st.Format.Type = 18
+$st.Open($args[1], 3)
+$v.AudioOutputStream = $st
+[void]$v.Speak([IO.File]::ReadAllText($args[2], [Text.Encoding]::UTF8))
+$st.Close()
+"""
+ONECORE_PREFIX = "onecore:"
+
+
+def onecore_voices():
+    """读 OneCore 目录里的中文语音，返回语音编号的列表（读注册表，不用管理员权限）"""
+    try:
+        import winreg
+        path = r"SOFTWARE\Microsoft\Speech_OneCore\Voices\Tokens"
+        out = []
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path) as tokens:
+            for i in range(winreg.QueryInfoKey(tokens)[0]):
+                key = winreg.EnumKey(tokens, i)
+                try:
+                    with winreg.OpenKey(tokens, key + r"\Attributes") as attrs:
+                        langs = str(winreg.QueryValueEx(attrs, "Language")[0]).lower().split(";")
+                except OSError:
+                    continue
+                if {s.strip() for s in langs} & {"804", "404", "c04", "1004", "1404"}:  # 简体、繁体、粤语等中文
+                    out.append(ONECORE_PREFIX + key)
+        return out
+    except (ImportError, OSError):
+        return []
 
 
 def run_quiet(cmd, timeout=30):
@@ -214,7 +252,7 @@ def find_local_voices():
         names = run_quiet(["powershell", "-NoProfile", "-Command",
                            "Add-Type -AssemblyName System.Speech;(New-Object System.Speech.Synthesis.SpeechSynthesizer)"
                            ".GetInstalledVoices()|%{$_.VoiceInfo}|?{$_.Culture.Name -like 'zh*'}|%{$_.Name}"])
-        out = [n.strip() for n in names.splitlines() if n.strip()]
+        out = [n.strip() for n in names.splitlines() if n.strip()] or onecore_voices()  # 桌面语音里有中文就不动，完全没有才用 OneCore
     elif shutil.which("say"):
         out = [line.split()[0] for line in run_quiet(["say", "-v", "?"]).splitlines()
                if "zh_CN" in line or "zh_TW" in line or "zh_HK" in line]
@@ -288,7 +326,7 @@ def tts_chunks(text, size=140):
 def load_config():
     cfg = dict(DEFAULT_CONFIG)
     if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, encoding="utf-8") as f:
+        with open(CONFIG_PATH, encoding="utf-8-sig") as f:  # 旧版记事本保存时会加 BOM，也要读得了
             cfg.update(json.load(f))
     changed = not os.path.exists(CONFIG_PATH)
     if not cfg["teacher_password"]:
@@ -478,14 +516,16 @@ def make_speech_local(text, voice=None, repeat=None):
         return name
     tmp = path[:-4] + ".tmp.wav"
     if os.name == "nt":
-        ps = os.path.join(AUDIO_DIR, "sapi.ps1")
+        core = voice[6:].startswith(ONECORE_PREFIX)
+        ps = os.path.join(AUDIO_DIR, "onecore.ps1" if core else "sapi.ps1")
         if not os.path.exists(ps):
             with open(ps, "w", encoding="utf-8-sig") as f:
-                f.write(SAPI_PS)
+                f.write(ONECORE_PS if core else SAPI_PS)
         txt = path[:-4] + ".txt"
         with open(txt, "w", encoding="utf-8") as f:
             f.write(say)
-        run_quiet(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps, voice[6:], tmp, txt], 60)
+        run_quiet(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps,
+                   voice[6 + len(ONECORE_PREFIX):] if core else voice[6:], tmp, txt], 60)
         try:
             os.remove(txt)
         except OSError:
