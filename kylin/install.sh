@@ -1,12 +1,20 @@
 #!/bin/bash
 # 班级助手 - 麒麟/Linux 一体机安装（安装 + 立即启动 + 开机自启）
-# 用法：wget -qO- http://服务器/kylin/install.sh | bash -s 班级 教室密钥
-CLASS="$1"
-KEY="$2"
-SERVER="${3:-__SERVER__}"
-if [ -z "$CLASS" ] || [ -z "$KEY" ]; then
-  echo "用法：wget -qO- $SERVER/kylin/install.sh | bash -s 班级 教室密钥"
-  exit 1
+# 单班安装：wget -qO- http://服务器/kylin/install.sh | bash -s 班级 教室密钥
+# 桌面云统一安装（按网卡 MAC 自动认班）：wget -qO- http://服务器/kylin/install.sh | bash -s auto
+AUTO=0
+if [ "$1" = "auto" ] || [ "$1" = "--auto" ]; then
+  AUTO=1
+  SERVER="${2:-__SERVER__}"
+else
+  CLASS="$1"
+  KEY="$2"
+  SERVER="${3:-__SERVER__}"
+  if [ -z "$CLASS" ] || [ -z "$KEY" ]; then
+    echo "单班用法：wget -qO- $SERVER/kylin/install.sh | bash -s 班级 教室密钥"
+    echo "桌面云通用用法：wget -qO- $SERVER/kylin/install.sh | bash -s auto"
+    exit 1
+  fi
 fi
 DIR="$HOME/.classcall"
 mkdir -p "$DIR" "$HOME/.config/autostart"
@@ -35,11 +43,18 @@ if ! python3 -c "import tkinter" 2>/dev/null && [ ! -d "$DIR/tk" ]; then
   fi
 fi
 
+if [ "$AUTO" = "1" ]; then
+cat > "$DIR/config.txt" <<EOF
+server=$SERVER
+mode=auto
+EOF
+else
 cat > "$DIR/config.txt" <<EOF
 server=$SERVER
 class=$CLASS
 key=$KEY
 EOF
+fi
 
 cat > "$HOME/.config/autostart/classcall.desktop" <<EOF
 [Desktop Entry]
@@ -55,7 +70,12 @@ sleep 1
 nohup python3 "$DIR/receiver.py" >/dev/null 2>&1 &
 sleep 2
 if pgrep -f "$DIR/receiver.py" >/dev/null; then
-  echo "✅ 安装完成：$CLASS 接收端已启动，并已设置开机自动运行"
+  if [ "$AUTO" = "1" ]; then
+    echo "✅ 安装完成（桌面云自动认班模式）：接收端已启动，并已设置开机自动运行"
+    echo "   本机启动后会按网卡 MAC 地址自动关联班级；未绑定时屏幕会提示选择班级"
+  else
+    echo "✅ 安装完成：$CLASS 接收端已启动，并已设置开机自动运行"
+  fi
   echo "   出问题时查看日志：cat $DIR/receiver.log"
 else
   echo "❌ 启动失败，运行下面命令查看原因："

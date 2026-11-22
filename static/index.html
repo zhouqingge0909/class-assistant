@@ -861,6 +861,35 @@
       <div id="clsDropBox" class="hidden" style="margin-top:18px;padding-top:12px;border-top:1px dashed var(--line);text-align:right">
         <button class="btn ghost sm" id="clsDrop" style="color:var(--bad)">删除本班</button></div>
     </div>
+    <details class="card hidden" id="voiBox" style="margin-top:14px;box-shadow:none;border:1.5px solid var(--line)">
+      <summary style="cursor:pointer;list-style:none">
+        <div class="ctitle" style="margin:0">
+          <div class="ib"><svg class="i"><use href="#i-board"/></svg></div>
+          <div><h2 style="font-size:16px">VOI 桌面云 / 全校统一安装（按 MAC 自动认班）</h2>
+            <div class="sub">适合全校同传母盘、每次开机还原的教室一体机，只需在母机装一次</div></div>
+          <span class="right me" id="voiBadge">展开 ▾</span>
+        </div>
+      </summary>
+      <div style="margin-top:14px">
+        <label class="switch" style="display:flex"><input type="checkbox" id="voiOpen"><span class="track"></span>允许新大屏开机自选班级绑定</label>
+        <p class="me" id="voiTip" style="display:block;white-space:normal;margin:6px 0 0;line-height:1.6"></p>
+        <div class="sec" style="margin-top:14px">
+          <div class="row" style="gap:8px;flex-wrap:wrap"><span class="me">母机系统：</span>
+            <button class="chip" data-os="linux">麒麟 / 统信（Linux）</button><button class="chip" data-os="win">Windows</button></div>
+          <div class="me" id="voiHow" style="white-space:normal;margin-top:8px"></div>
+          <div class="row" style="margin-top:6px"><code id="voiCmd" style="flex:1;background:var(--soft);padding:10px 12px;border-radius:10px;font-size:12.5px;word-break:break-all"></code>
+            <button class="btn soft sm" id="voiCopy">复制命令</button></div>
+          <p class="me" style="display:block;white-space:normal;margin:6px 0 0;font-size:12.5px">这条通用命令不含班级和密钥：同步给全校一体机后，每台大屏开机自动上报网卡 MAC；未绑定时屏幕会按年级列出待绑班级，点一下即完成绑定，电脑重启还原也不丢。</p>
+        </div>
+        <div class="sec" style="margin-top:16px">
+          <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+            <span class="label" style="margin:0;font-size:13px;color:var(--muted);font-weight:700" id="voiListTitle">已绑定大屏</span>
+            <button class="btn ghost sm hidden" id="voiUnbindAll" style="color:var(--bad)">全部解绑</button>
+          </div>
+          <div class="list" id="voiList"></div>
+        </div>
+      </div>
+    </details>
     <div class="btns"><button class="btn" id="clsClose">关闭</button></div>
   </div>
 </div>
@@ -1963,13 +1992,42 @@ async function openClasses() {
   if (S.invCls) openInvite(S.invCls); else $('#invBox').classList.add('hidden');
 }
 function renderClasses() {
-  $('#clsList').innerHTML = S.roster.classes.map(c => `<div class="item" style="align-items:center;flex-wrap:wrap">
+  const devs = S.roster.devices || {};
+  $('#clsList').innerHTML = S.roster.classes.map(c => {
+    const d = devs[c.name];
+    return `<div class="item" style="align-items:center;flex-wrap:wrap">
     <span class="dot ${S.roster.online[c.name] ? 'on' : ''}"></span>
-    <div class="main"><b>${esc(c.name)}</b> <span class="me">${c.count} 人${S.roster.online[c.name] ? ' · 大屏在线' : ''}${c.role === 'head' ? ' · 我是班主任' : ''}</span></div>
+    <div class="main"><b>${esc(c.name)}</b> <span class="me">${c.count} 人${S.roster.online[c.name] ? ' · 大屏在线' : ''}${c.role === 'head' ? ' · 我是班主任' : ''}${d ? ` · 已绑大屏 ${esc(d.mac)}` : ''}</span></div>
+    ${S.roster.admin && !S.roster.public && d ? `<button class="btn ghost sm" data-unbindcls="${esc(c.name)}" data-unbindmac="${esc(d.mac)}">解绑大屏</button>` : ''}
     <button class="btn primary sm" data-clsinv="${esc(c.name)}">${ic('duty', 'sm')}邀请老师</button>
     <button class="btn soft sm" data-clsedit="${esc(c.name)}">编辑名单</button>
     <button class="btn soft sm" data-clsdev="${esc(c.name)}">${ic('board', 'sm')}一体机</button>
-    ${S.roster.admin ? `<button class="btn ghost sm" data-clsdel="${esc(c.name)}">${ic('trash', 'sm')}</button>` : ''}</div>`).join('') || empty('还没有班级');
+    ${S.roster.admin ? `<button class="btn ghost sm" data-clsdel="${esc(c.name)}">${ic('trash', 'sm')}</button>` : ''}</div>`;
+  }).join('') || empty('还没有班级');
+  renderVoi();
+}
+function renderVoi() {
+  const show = !!(S.roster && S.roster.admin && !S.roster.public);
+  $('#voiBox').classList.toggle('hidden', !show);
+  if (!show) return;
+  const open = !!S.roster.device_bind_open, list = S.roster.device_list || [], win = S.os === 'win';
+  $('#voiOpen').checked = open;
+  $('#voiBadge').textContent = (list.length ? `已绑 ${list.length} 台` : '未绑定') + (open ? ' · 绑定已开放 ▾' : ' ▾');
+  $('#voiBadge').style.color = open ? 'var(--acc-ink)' : '';
+  $('#voiTip').textContent = open
+    ? '已开启：未绑定的大屏开机后会自动弹出待绑班级列表，在屏幕上点一下班级即可绑定。全校绑完建议关闭此开关，避免误操作。'
+    : '已关闭：已经绑定的大屏照常开机自动认班，不受影响；新大屏不会弹出班级列表。全校装机或换教室重绑时再打开。';
+  $('#voiHow').textContent = win
+    ? '在 VOI 母机上按 Win+R（或打开 PowerShell 窗口），粘贴下面通用命令回车。装好后同步给全校教室即可：'
+    : '在 VOI 母机上打开终端，粘贴下面通用命令运行。装好后同步给全校教室即可：';
+  $('#voiCmd').textContent = win ? S.roster.install_auto_win : S.roster.install_auto;
+  $('#voiListTitle').textContent = `已绑定大屏（${list.length} 台）`;
+  $('#voiUnbindAll').classList.toggle('hidden', list.length < 2);
+  $('#voiList').innerHTML = list.map(d => `<div class="item" style="align-items:center;flex-wrap:wrap">
+    <span class="dot ${d.online ? 'on' : ''}"></span>
+    <div class="main"><b>${esc(d.class)}</b> <span class="me">${esc(d.mac)}${d.hostname ? ` · ${esc(d.hostname)}` : ''}${d.bound_at ? ` · ${esc(d.bound_at)} 绑定` : ''}</span></div>
+    <button class="btn ghost sm" data-unbindmac="${esc(d.mac)}" data-unbindcls="${esc(d.class)}">解绑</button></div>`).join('')
+    || '<div class="me" style="padding:4px 0">还没有通过 MAC 绑定的大屏</div>';
 }
 function editClass(name) {
   S.clsEdit = name;
@@ -1994,6 +2052,7 @@ function updateClsCount() {
                                  : '在这个班的一体机上打开终端，粘贴运行：';
   $('#clsUnCmd').textContent = win ? S.roster.uninstall_win : S.roster.uninstall;
   if (key) $('#clsCmd').textContent = (win ? S.roster.install_win.replace('{班级}', name.replace(/[%&#+?'"\s]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0'))) : S.roster.install.replace('{班级}', name)).replace('{密钥}', key);
+  renderVoi();
 }
 async function openInvite(name) {
   S.invCls = name;
@@ -2222,6 +2281,16 @@ document.addEventListener('click', async e => {
   const cdl = t.closest('[data-clsdel]');
   if (cdl) { const n = cdl.dataset.clsdel; if (!confirm(`删除"${n}"？这个班的名单、消息、作业、积分、考勤、设置会全部删掉，无法恢复。`)) return;
     try { await api('/api/roster/delete', { class: n }); if (S.clsEdit === n) editClass(null); await reloadClasses(); toast('已删除'); } catch (err) { toast(err.message); } return; }
+  const ub = t.closest('[data-unbindmac]');
+  if (ub) {
+    const mac = ub.dataset.unbindmac, cn = ub.dataset.unbindcls || '';
+    if (!confirm(`解除「${cn || mac}」的大屏绑定（${mac}）？\n\n这台大屏几秒内会退出当前班级；换教室后可重新选班绑定。`)) return;
+    try {
+      const r = await api('/api/device/unbind', { mac });
+      S.roster = await api('/api/roster'); renderClasses();
+      toast(r.open ? '已解绑 ✓ 大屏马上可以重新选班' : '已解绑 ✓ 如需在新大屏重选班级，请先打开「允许新大屏开机自选班级绑定」');
+    } catch (err) { toast(err.message); } return;
+  }
   const dc = t.closest('[data-delcd]'); if (dc) { const l = readCd(); l.splice(+dc.dataset.delcd, 1); renderCd(l); renderBoardPreview(); return saveCd(); }
   if (t.closest('#remDel') && S.remEdit) {
     if (!confirm('删除这条提醒？')) return;
@@ -2421,6 +2490,24 @@ $('#clsRemoteUn').onclick = async () => {
 };
 $('#clsCopy').onclick = async () => {
   copyText($('#clsCmd').textContent, '安装命令');
+};
+$('#voiCopy').onclick = () => copyText($('#voiCmd').textContent, '通用安装命令');
+$('#voiOpen').onchange = async () => {
+  const open = $('#voiOpen').checked;
+  try {
+    await api('/api/device/toggle', { open });
+    S.roster.device_bind_open = open; renderVoi();
+    toast(open ? '已开放大屏选班绑定 ✓ 全校绑完后记得关闭' : '已关闭新大屏选班绑定 ✓ 已绑定的大屏照常使用');
+  } catch (err) { $('#voiOpen').checked = !open; toast(err.message); }
+};
+$('#voiUnbindAll').onclick = async () => {
+  const n = (S.roster.device_list || []).length;
+  if (!n || !confirm(`确定要解除全部 ${n} 台大屏的 MAC 绑定吗？\n\n一般只在学年换教室重排时使用。解除后，各班大屏会退出当前班级并等待重新绑定。`)) return;
+  try {
+    const r = await api('/api/device/unbind', { all: true });
+    S.roster = await api('/api/roster'); renderClasses();
+    toast(`已解绑全部 ${r.removed} 台大屏 ✓`);
+  } catch (err) { toast(err.message); }
 };
 $('#fontDone').onclick = () => $('#fontMask').classList.add('hidden');
 $('#examNew').onclick = () => openExamForm();

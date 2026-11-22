@@ -44,6 +44,7 @@ QUIZ_PATH = os.path.join(DATA_DIR, "quiz.json")
 EXAM_PATH = os.path.join(DATA_DIR, "exams.json")
 ROSTER_PATH = os.path.join(DATA_DIR, "roster.json")
 USERS_PATH = os.path.join(DATA_DIR, "users.json")  # 老师账号、各班成员（班主任/科任）、邀请码
+DEVICES_PATH = os.path.join(DATA_DIR, "devices.json")  # 桌面云 / 全校统一安装：大屏网卡 MAC -> 班级绑定关系
 BACKUP_DIR = os.path.join(BASE, "backups")  # 每日数据备份（不在 data/ 里，避免备份套备份）  # 工作台里添加/修改的班级名单（优先于 students.csv）
 IMG_DIR = os.path.join(DATA_DIR, "images")
 FILE_DIR = os.path.join(DATA_DIR, "files")      # 老师发到大屏的文档（Word/PDF/PPT…），保留 7 天
@@ -408,6 +409,9 @@ users = read_json(USERS_PATH, {"users": {}, "acl": {}, "invites": {}})
 for _k in ("users", "acl", "invites", "class_keys", "aliases"):  # aliases：改名前的班级名 -> 新名（一体机还用旧名连）
     users.setdefault(_k, {})
 users.setdefault("admins", [])  # 主管理员（用管理员密码登录的）指定的其他管理员：用自己的登录码登录，不用共用密码
+devices = read_json(DEVICES_PATH, {"bindings": {}})
+if not isinstance(devices.get("bindings"), dict):
+    devices["bindings"] = {}
 
 
 def is_owner(s):
@@ -1107,6 +1111,60 @@ def save_users():
     write_json(USERS_PATH, users)
 
 
+def save_devices():
+    write_json(DEVICES_PATH, devices)
+
+
+def norm_mac(mac):
+    """统一 MAC 格式为 AA:BB:CC:DD:EE:FF；过滤空地址、广播地址、组播地址"""
+    s = re.sub(r"[^0-9A-Fa-f]", "", str(mac or "")).upper()
+    if len(s) != 12 or s in ("000000000000", "FFFFFFFFFFFF") or (int(s[:2], 16) & 1):
+        return ""
+    return ":".join(s[i:i + 2] for i in range(0, 12, 2))
+
+
+_CN_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+
+
+def class_sort_key(name):
+    """按学校常见顺序排班级（高一1班、高一2班……高一10班、高二1班……），70 个班也一目了然"""
+    parts = []
+    for tok in re.split(r"(\d+|[一二三四五六七八九十])", str(name)):
+        if not tok:
+            continue
+        if tok.isdigit():
+            parts.append((0, int(tok), ""))
+        elif tok in _CN_NUM:
+            parts.append((0, _CN_NUM[tok], tok))
+        else:
+            parts.append((1, 0, tok))
+    return parts
+
+
+def device_map_by_class():
+    """班级 -> 已绑定的大屏信息（供工作台班级列表显示）"""
+    out = {}
+    for mac, b in devices["bindings"].items():
+        cls = resolve_class(b.get("class") or "")
+        if cls:
+            out[cls] = {"mac": mac, "hostname": b.get("hostname", ""),
+                        "bound_at": datetime.fromtimestamp(b.get("bound_at", 0), CN).strftime("%m-%d %H:%M") if b.get("bound_at") else ""}
+    return out
+
+
+def device_list_info():
+    """所有已绑定大屏的清单（按班级顺序排好）"""
+    now = time.time()
+    items = []
+    for mac, b in devices["bindings"].items():
+        cls = resolve_class(b.get("class") or "")
+        items.append({"mac": mac, "class": cls, "hostname": b.get("hostname", ""),
+                      "bound_at": datetime.fromtimestamp(b.get("bound_at", 0), CN).strftime("%m-%d %H:%M") if b.get("bound_at") else "",
+                      "online": now - last_seen.get(cls, 0) < 15})
+    items.sort(key=lambda x: (class_sort_key(x["class"]), x["mac"]))
+    return items
+
+
 def class_key(cls):
     """这个班的教室密钥：有独立密钥用它；没有的话本校服务器用全局密钥，公共服务器没有"""
     return users["class_keys"].get(cls) or (None if PUBLIC else CFG["classroom_key"])
@@ -1188,6 +1246,13 @@ def rename_class(old, new):
     for d in (last_seen, pick_history):
         if old in d:
             d[new] = d.pop(old)
+    dev_changed = False
+    for b in devices["bindings"].values():
+        if b.get("class") == old:
+            b["class"] = new
+            dev_changed = True
+    if dev_changed:
+        save_devices()
 
 
 def drop_class(cls):
@@ -1219,6 +1284,11 @@ def drop_class(cls):
     write_json(SETTINGS_PATH, settings)
     last_seen.pop(cls, None)
     pick_history.pop(cls, None)
+    drop_macs = [m for m, b in devices["bindings"].items() if b.get("class") == cls]
+    if drop_macs:
+        for m in drop_macs:
+            devices["bindings"].pop(m, None)
+        save_devices()
     purge_files(cls)
 
 
@@ -1547,6 +1617,8 @@ class Handler(BaseHTTPRequestHandler):
             return None if self.allowed(str(body.get("class") or ""), "head") else "head"
         if path == "/api/members/role":  # 班主任和任课老师互换：只有管理员能做（免得班主任之间互相降）
             return None if admin else "admin"
+        if path in ("/api/device/toggle", "/api/device/unbind"):  # 桌面云大屏 MAC 绑定管理：只有管理员能做
+            return None if admin else "admin"
         if path == "/api/members/remove":
             return None if self.allowed(str(body.get("class") or ""), "head") else "head"
         return None  # 其余（上传图片、试听、常用语、解析名单……）登录即可
@@ -1656,7 +1728,10 @@ class Handler(BaseHTTPRequestHandler):
                 body = body.replace(b"__SERVER__", f"http://{self.host()}".encode())
             if u.path.endswith(".ps1"):  # Windows 安装命令把班级、密钥放在网址里（PowerShell 单引号字符串，' 要写成 ''）
                 ps = lambda k: (q.get(k) or [""])[0].replace("'", "''").replace("\r", "").replace("\n", "")
-                body = body.replace(b"'__CLASS__'", f"'{ps('c')}'".encode()).replace(b"'__KEY__'", f"'{ps('k')}'".encode())
+                auto = "1" if (q.get("auto") or [""])[0] == "1" else "0"
+                body = (body.replace(b"'__CLASS__'", f"'{ps('c')}'".encode())
+                            .replace(b"'__KEY__'", f"'{ps('k')}'".encode())
+                            .replace(b"'__AUTO__'", f"'{auto}'".encode()))
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -1894,17 +1969,26 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return self.wfile.write(body)
         if u.path == "/api/roster":
-            cmd = f"wget -qO- {self.host()}/kylin/install.sh | bash -s {{班级}} {{密钥}}"
-            win = ("powershell -nop -c \"iex ([Text.Encoding]::UTF8.GetString((New-Object Net.WebClient).DownloadData("  # 不能带 $：在 PowerShell 窗口里粘贴时外层会先把 $变量 替换掉
-                   f"'http://{self.host()}/kylin/install.ps1?c={{班级}}&k={{密钥}}')))\"")
             host = self.host()
+            cmd = f"wget -qO- {host}/kylin/install.sh | bash -s {{班级}} {{密钥}}"
+            win = ("powershell -nop -c \"iex ([Text.Encoding]::UTF8.GetString((New-Object Net.WebClient).DownloadData("  # 不能带 $：在 PowerShell 窗口里粘贴时外层会先把 $变量 替换掉
+                   f"'http://{host}/kylin/install.ps1?c={{班级}}&k={{密钥}}')))\"")
+            auto_cmd = f"wget -qO- {host}/kylin/install.sh | bash -s auto"
+            auto_win = f"powershell -nop -c \"iex ([Text.Encoding]::UTF8.GetString((New-Object Net.WebClient).DownloadData('http://{host}/kylin/install.ps1?auto=1')))\""
             unwin = f"powershell -nop -c \"iex ([Text.Encoding]::UTF8.GetString((New-Object Net.WebClient).DownloadData('http://{host}/kylin/uninstall.ps1')))\""
+            admin = is_admin(self.sess())
             mine = {c: v for c, v in load_students().items() if self.allowed(c, "head")}
+            devs = device_map_by_class() if not PUBLIC else {}
             return self.send_json({"classes": [{"name": c, "count": len(v), "names": [x["name"] for x in v], "role": self.role(c)}
                                                for c, v in mine.items()], "install": cmd, "install_win": win,
+                                   "install_auto": auto_cmd if admin and not PUBLIC else "",
+                                   "install_auto_win": auto_win if admin and not PUBLIC else "",
                                    "uninstall": f"wget -qO- {host}/kylin/uninstall.sh | bash", "uninstall_win": unwin,
                                    "keys": {c: class_key(c) or "" for c in mine},
-                                   "admin": is_admin(self.sess()), "public": PUBLIC,
+                                   "devices": {c: devs[c] for c in mine if c in devs},
+                                   "device_list": device_list_info() if admin and not PUBLIC else [],
+                                   "device_bind_open": bool(settings.get("device_bind_open")) if admin and not PUBLIC else False,
+                                   "admin": admin, "public": PUBLIC,
                                    "online": {c: time.time() - last_seen.get(c, 0) < 15 for c in mine}})
         if u.path == "/api/files":
             uid, head = self.sess()["uid"], self.allowed(qcls, "head")
@@ -1981,6 +2065,10 @@ class Handler(BaseHTTPRequestHandler):
             if not self.classroom_ok(q, body.get("class")):
                 return self.send_json({"error": "密钥错误"}, 403)
             return self.api_attend_save(body)
+        if u.path == "/api/device/check":
+            return self.api_device_check(body)
+        if u.path == "/api/device/bind":
+            return self.api_device_bind(body)
         if u.path == "/api/register":
             return self.api_register(body) if PUBLIC else self.send_json({"error": "not found"}, 404)
         if u.path == "/api/register/code" and not PUBLIC:
@@ -2032,6 +2120,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/notes/add": self.api_note_add, "/api/notes/edit": self.api_note_edit, "/api/notes/delete": self.api_note_delete,
             "/api/files/delete": self.api_file_delete,
             "/api/admin/password": self.api_admin_password, "/api/admins/set": self.api_admins_set,
+            "/api/device/toggle": self.api_device_toggle, "/api/device/unbind": self.api_device_unbind,
             "/api/backup/now": lambda body, sender: self.send_json({"ok": True, "name": make_backup(), "items": list_backups()}),
         }.get(u.path)
         if handler:
@@ -2962,6 +3051,113 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"error": "没有在表格里找到学生姓名"}, 400)
         self.send_json({"ok": True, "names": list(dict.fromkeys(names))})
 
+    # ---------- 桌面云 / 全校统一安装：按大屏网卡 MAC 自动认班 ----------
+    def api_device_check(self, body):
+        """一体机（通用安装模式）开机或解绑后上报本机网卡 MAC：已绑定直接返回班级和密钥；未绑定且管理员已开放绑定，返回可选班级列表"""
+        if PUBLIC:
+            return self.send_json({"error": "公共服务器不支持大屏 MAC 自动绑定"}, 404)
+        mac = norm_mac(body.get("mac"))
+        raw_macs = body.get("macs") if isinstance(body.get("macs"), list) else []
+        macs = []
+        for x in ([mac] if mac else []) + [norm_mac(m) for m in raw_macs[:8]]:
+            if x and x not in macs:
+                macs.append(x)
+        if not macs:
+            return self.send_json({"error": "未获取到有效的网卡 MAC 地址"}, 400)
+        primary = macs[0]
+        hostname = re.sub(r"[\x00-\x1f]", "", str(body.get("hostname") or "")).strip()[:40]
+        with lock:
+            students = load_students()
+            for m in macs:
+                b = devices["bindings"].get(m)
+                if not b:
+                    continue
+                cls = resolve_class(b.get("class") or "")
+                key = class_key(cls) if cls in students else None
+                if cls in students and key:
+                    if b.get("class") != cls or (hostname and b.get("hostname") != hostname):
+                        b["class"] = cls
+                        if hostname:
+                            b["hostname"] = hostname
+                        save_devices()
+                    return self.send_json({"bound": True, "mac": m, "class": cls, "key": key})
+                devices["bindings"].pop(m, None)  # 对应的班已不存在：清理失效绑定
+                save_devices()
+            is_open = bool(settings.get("device_bind_open"))
+            all_classes = sorted(students.keys(), key=class_sort_key)
+            if not is_open:
+                return self.send_json({"bound": False, "open": False, "mac": primary, "classes": [],
+                                       "message": "管理员暂未开放大屏选班绑定，请在工作台「班级管理」里开启后重试"})
+            bound_classes = {resolve_class(b.get("class") or "") for b in devices["bindings"].values()}
+            avail = [c for c in all_classes if c not in bound_classes]
+            return self.send_json({"bound": False, "open": True, "mac": primary, "classes": avail,
+                                   "total_classes": len(all_classes), "bound_count": len(all_classes) - len(avail)})
+
+    def api_device_bind(self, body):
+        """教室大屏选择班级后提交绑定（MAC <-> 班级 一对一）"""
+        if PUBLIC:
+            return self.send_json({"error": "公共服务器不支持大屏 MAC 自动绑定"}, 404)
+        mac = norm_mac(body.get("mac"))
+        cls = resolve_class(str(body.get("class") or "").strip())
+        hostname = re.sub(r"[\x00-\x1f]", "", str(body.get("hostname") or "")).strip()[:40]
+        if not mac:
+            return self.send_json({"error": "网卡 MAC 地址无效"}, 400)
+        if not cls:
+            return self.send_json({"error": "请选择班级"}, 400)
+        with lock:
+            if not settings.get("device_bind_open"):
+                return self.send_json({"error": "管理员已关闭大屏选班绑定，请先在工作台「班级管理」开启"}, 403)
+            students = load_students()
+            if cls not in students:
+                return self.send_json({"error": f"找不到「{cls}」，请点刷新列表重试"}, 404)
+            cur = devices["bindings"].get(mac)
+            if cur:
+                cur_cls = resolve_class(cur.get("class") or "")
+                if cur_cls == cls:
+                    return self.send_json({"ok": True, "bound": True, "mac": mac, "class": cls, "key": class_key(cls)})
+                if cur_cls in students:
+                    return self.send_json({"error": f"这台大屏已绑定「{cur_cls}」，请管理员先在工作台解绑"}, 409)
+            other = next((m for m, b in devices["bindings"].items() if m != mac and resolve_class(b.get("class") or "") == cls), None)
+            if other:
+                return self.send_json({"error": f"「{cls}」已绑定其他大屏（{other}），请管理员先在工作台解绑"}, 409)
+            devices["bindings"][mac] = {"class": cls, "hostname": hostname, "bound_at": time.time()}
+            save_devices()
+            key = class_key(cls)
+        self.send_json({"ok": True, "bound": True, "mac": mac, "class": cls, "key": key})
+
+    def api_device_toggle(self, body, sender):
+        """管理员开启/关闭大屏自主选班绑定（已绑定的大屏不受影响）"""
+        if PUBLIC:
+            return self.send_json({"error": "公共服务器不支持此功能"}, 404)
+        with lock:
+            settings["device_bind_open"] = bool(body.get("open"))
+            write_json(SETTINGS_PATH, settings)
+        self.send_json({"ok": True, "open": settings["device_bind_open"]})
+
+    def api_device_unbind(self, body, sender):
+        """管理员解绑大屏（按 MAC、按班级、或全部解绑）；已运行的大屏会在 2 秒内自动退回待绑定状态"""
+        if PUBLIC:
+            return self.send_json({"error": "公共服务器不支持此功能"}, 404)
+        with lock:
+            removed = 0
+            if body.get("all"):
+                removed = len(devices["bindings"])
+                devices["bindings"].clear()
+            elif body.get("mac"):
+                mac = norm_mac(body.get("mac"))
+                if mac in devices["bindings"]:
+                    devices["bindings"].pop(mac)
+                    removed = 1
+            elif body.get("class"):
+                cls = resolve_class(str(body.get("class") or ""))
+                drop = [m for m, b in devices["bindings"].items() if resolve_class(b.get("class") or "") == cls]
+                for m in drop:
+                    devices["bindings"].pop(m, None)
+                    removed += 1
+            if removed:
+                save_devices()
+        self.send_json({"ok": True, "removed": removed, "open": bool(settings.get("device_bind_open"))})
+
     def api_quiz_delete(self, body, sender):
         with lock:
             quizzes[:] = [x for x in quizzes if x["id"] != body.get("id")]
@@ -3122,6 +3318,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def api_poll(self, q):
         cls = (q.get("class") or [""])[0]
+        if not PUBLIC and q.get("mac"):  # 桌面云按 MAC 自动绑定的大屏：管理员解绑或改绑后马上通知重绑
+            mac = norm_mac(q["mac"][0])
+            b = devices["bindings"].get(mac) if mac else None
+            if not b or resolve_class(b.get("class") or "") != cls:
+                return self.send_json({"rebind": True})
         if not self.classroom_ok(q, cls):
             return self.send_json({"error": "密钥错误"}, 403)
         now = time.time()

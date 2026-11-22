@@ -15,10 +15,12 @@ import queue
 import random
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import threading
 import time
+import uuid
 try:
     import tkinter as tk
 except ImportError:  # 没有 sudo 密码装不了 python3-tk 时，install.sh 把它解压到 ~/.classcall/tk：带上路径重新启动自己
@@ -32,6 +34,7 @@ except ImportError:  # 没有 sudo 密码装不了 python3-tk 时，install.sh �
             "TCL_LIBRARY": _tk + "/usr/share/tcltk/tcl8.6", "TK_LIBRARY": _tk + "/usr/share/tcltk/tk8.6"}
     os.environ.update(_env)
     os.execv(sys.executable, [sys.executable] + sys.argv)
+import urllib.error
 import urllib.parse
 import urllib.request
 from tkinter import font as tkfont
@@ -88,24 +91,226 @@ def load_config():
 
 CFG = load_config()
 SERVER = CFG["server"].rstrip("/")
-CLASS = CFG["class"]
-KEY = CFG["key"]
-Q_CLASS, Q_KEY = urllib.parse.quote(CLASS), urllib.parse.quote(KEY)
-POLL_URL = f"{SERVER}/api/poll?class={Q_CLASS}&key={Q_KEY}&rv=4"  # rv：3 起认得远程卸载指令，4 起会下载老师发来的文件
-BOARD_URL = f"{SERVER}/api/board?class={Q_CLASS}&key={Q_KEY}&fv=2"  # fv：认得中文字体名的新版
-ACK_URL = f"{SERVER}/api/ack?key={Q_KEY}"
-TOOL_URL = f"{SERVER}/api/screen/tool?key={Q_KEY}"  # 屏幕右边「工具」：在大屏上直接开计时、抽号
-COLLECT_URL = f"{SERVER}/collect?class={Q_CLASS}&key={Q_KEY}"
-ATTEND_URL = f"{SERVER}/attend?class={Q_CLASS}&key={Q_KEY}"
+AUTO_MODE = (CFG.get("mode", "").lower() == "auto") or not (CFG.get("class") and CFG.get("key"))
+CLASS = ""
+KEY = ""
+BOUND_MAC = ""
+Q_CLASS = Q_KEY = ""
+POLL_URL = BOARD_URL = ACK_URL = TOOL_URL = COLLECT_URL = ATTEND_URL = ""
 SHOW_FLAG = os.path.join(HERE, "show-board")  # 桌面"班级看板"图标会创建这个文件
 FFPLAY = None if WIN else shutil.which("ffplay")
 APLAY = None if WIN or FFPLAY else (shutil.which("paplay") or shutil.which("aplay"))  # 没有 ffplay 时用系统自带的放 wav（局域网版的语音和叮咚都是 wav）
 audio_lock = threading.Lock()
 
 
+def set_binding(cls, key, mac=""):
+    """更新当前绑定的班级、教室密钥和所有请求地址（单班模式启动设一次；桌面云模式自动绑定/解绑时切换）"""
+    global CLASS, KEY, BOUND_MAC, Q_CLASS, Q_KEY, POLL_URL, BOARD_URL, ACK_URL, TOOL_URL, COLLECT_URL, ATTEND_URL
+    CLASS, KEY, BOUND_MAC = cls or "", key or "", mac or ""
+    if CLASS and KEY:
+        Q_CLASS, Q_KEY = urllib.parse.quote(CLASS), urllib.parse.quote(KEY)
+        mac_q = f"&mac={urllib.parse.quote(BOUND_MAC)}" if BOUND_MAC else ""
+        POLL_URL = f"{SERVER}/api/poll?class={Q_CLASS}&key={Q_KEY}&rv=4{mac_q}"  # rv：3 起认得远程卸载指令，4 起会下载老师发来的文件
+        BOARD_URL = f"{SERVER}/api/board?class={Q_CLASS}&key={Q_KEY}&fv=2"  # fv：认得中文字体名的新版
+        ACK_URL = f"{SERVER}/api/ack?key={Q_KEY}"
+        TOOL_URL = f"{SERVER}/api/screen/tool?key={Q_KEY}"  # 屏幕右边「工具」：在大屏上直接开计时、抽号
+        COLLECT_URL = f"{SERVER}/collect?class={Q_CLASS}&key={Q_KEY}"
+        ATTEND_URL = f"{SERVER}/attend?class={Q_CLASS}&key={Q_KEY}"
+    else:
+        Q_CLASS = Q_KEY = POLL_URL = BOARD_URL = ACK_URL = TOOL_URL = COLLECT_URL = ATTEND_URL = ""
+
+
+if not AUTO_MODE:
+    set_binding(CFG.get("class", ""), CFG.get("key", ""))
+
+
 def fetch_json(url, timeout=8):
     with urllib.request.urlopen(url, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8"))
+
+
+def post_json(url, payload, timeout=8):
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            body = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            body = {"error": f"服务器返回 {e.code}"}
+        return e.code, body
+
+
+# ---------------- 本机网卡 MAC 获取（桌面云 / 自动还原环境按硬件识别教室） ----------------
+VIRTUAL_NIC_KW = (
+    "virtual", "vmware", "vbox", "hyper-v", "tap-", "tap ", "tun", "vpn", "loopback",
+    "bluetooth", "teredo", "isatap", "pseudo", "wan miniport", "wi-fi direct", "npcap",
+    "docker", "veth", "virbr", "tailscale", "wireguard", "zerotier", "hamachi", "sangfor", "easyconnect",
+)
+
+
+def norm_mac(mac):
+    """规范为 AA:BB:CC:DD:EE:FF；过滤全零、广播、组播（含 uuid 随机假地址）"""
+    s = re.sub(r"[^0-9A-Fa-f]", "", str(mac or "")).upper()
+    if len(s) != 12 or s in ("000000000000", "FFFFFFFFFFFF") or (int(s[:2], 16) & 1):
+        return ""
+    return ":".join(s[i:i + 2] for i in range(0, 12, 2))
+
+
+def is_local_admin_mac(mac):
+    return bool(mac) and bool(int(mac[:2], 16) & 2)
+
+
+def is_virtual_desc(desc):
+    low = str(desc or "").lower()
+    return any(k in low for k in VIRTUAL_NIC_KW)
+
+
+def route_local_ip(server_url):
+    """找出本机连向服务器用的那块网卡 IP，用来优先选出真正联网的物理网卡"""
+    try:
+        u = urllib.parse.urlparse(server_url)
+        host = u.hostname or ""
+        port = u.port or (443 if u.scheme == "https" else 80)
+        if not host:
+            return ""
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect((host, port))
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except OSError:
+        return ""
+
+
+def linux_macs(local_ip="", net_dir="/sys/class/net", ip_out=None):
+    """读取 Linux（麒麟/统信）物理网卡 MAC：优先连向服务器的网卡，其次物理有线网卡，最后物理无线网卡"""
+    if not os.path.isdir(net_dir):
+        return []
+    iface_ips = {}
+    if ip_out is None and shutil.which("ip"):
+        try:
+            r = subprocess.run(["ip", "-o", "-4", "addr", "show"], capture_output=True, text=True, timeout=5)
+            ip_out = r.stdout if r.returncode == 0 else ""
+        except Exception:
+            ip_out = ""
+    for line in (ip_out or "").splitlines():
+        m = re.match(r"\s*\d+:\s+([^\s:]+)\s+inet\s+([0-9.]+)/", line)
+        if m:
+            iface_ips.setdefault(m.group(1), set()).add(m.group(2))
+    cands = []
+    for name in sorted(os.listdir(net_dir)):
+        if name == "lo" or is_virtual_desc(name):
+            continue
+        p = os.path.join(net_dir, name)
+        try:
+            with open(os.path.join(p, "address"), encoding="utf-8") as f:
+                mac = norm_mac(f.read().strip())
+        except OSError:
+            continue
+        if not mac:
+            continue
+        try:
+            with open(os.path.join(p, "type"), encoding="utf-8") as f:
+                if f.read().strip() != "1":  # 1 = ARPHRD_ETHER，只认以太网/Wi-Fi
+                    continue
+        except OSError:
+            pass
+        physical = os.path.exists(os.path.join(p, "device"))
+        wired = not (os.path.isdir(os.path.join(p, "wireless")) or name.startswith(("wl", "wlan")))
+        try:
+            with open(os.path.join(p, "operstate"), encoding="utf-8") as f:
+                up = f.read().strip().lower() == "up"
+        except OSError:
+            up = False
+        has_ip = bool(local_ip) and local_ip in iface_ips.get(name, ())
+        rank = (0 if has_ip else 1, 0 if physical else 1, 0 if wired else 1,
+                0 if up else 1, 0 if not is_local_admin_mac(mac) else 1, name)
+        cands.append((rank, mac))
+    cands.sort(key=lambda x: x[0])
+    out = []
+    for _, m in cands:
+        if m not in out:
+            out.append(m)
+    return out[:8]
+
+
+WIN_MAC_PS = (
+    "Get-WmiObject Win32_NetworkAdapter -Filter 'MACAddress IS NOT NULL' | ForEach-Object {"
+    "$c=Get-WmiObject Win32_NetworkAdapterConfiguration -Filter ('Index=' + $_.Index);"
+    "$ips=if($c -and $c.IPAddress){$c.IPAddress -join ','}else{''};"
+    "\"$($_.PhysicalAdapter)|$($_.NetConnectionStatus)|$($_.MACAddress)|$ips|$($_.Description)\"}"
+)
+
+
+def win_macs(local_ip="", wmi_out=None, getmac_out=None):
+    """读取 Windows（Win7/10/11 均支持）物理网卡 MAC，排除虚拟网卡和 VPN"""
+    if wmi_out is None:
+        try:
+            r = subprocess.run(["powershell", "-NoProfile", "-Command", WIN_MAC_PS],
+                               capture_output=True, text=True, timeout=15, creationflags=0x08000000)
+            wmi_out = r.stdout if r.returncode == 0 else ""
+        except Exception:
+            wmi_out = ""
+    cands = []
+    for line in (wmi_out or "").splitlines():
+        parts = line.split("|", 4)
+        if len(parts) < 5:
+            continue
+        phys_s, status_s, mac_s, ips_s, desc = parts
+        mac = norm_mac(mac_s)
+        if not mac or is_virtual_desc(desc):
+            continue
+        physical = phys_s.strip().lower() == "true"
+        up = status_s.strip() == "2"
+        ips = {x.strip() for x in ips_s.split(",") if x.strip()}
+        wifi = any(k in desc.lower() for k in ("wi-fi", "wifi", "wireless", "wlan", "无线"))
+        has_ip = bool(local_ip) and local_ip in ips
+        rank = (0 if has_ip else 1, 0 if physical else 1, 0 if not wifi else 1,
+                0 if up else 1, 0 if not is_local_admin_mac(mac) else 1, mac)
+        cands.append((rank, mac))
+    if not cands:
+        if getmac_out is None and shutil.which("getmac"):
+            try:
+                r = subprocess.run(["getmac", "/fo", "csv", "/nh"], capture_output=True, text=True,
+                                   timeout=10, creationflags=0x08000000)
+                getmac_out = r.stdout if r.returncode == 0 else ""
+            except Exception:
+                getmac_out = ""
+        for line in (getmac_out or "").splitlines():
+            m = re.search(r"([0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5})", line)
+            mac = norm_mac(m.group(1)) if m else ""
+            if mac:
+                cands.append(((2, 1, 1, 1, 0 if not is_local_admin_mac(mac) else 1, mac), mac))
+    cands.sort(key=lambda x: x[0])
+    out = []
+    for _, m in cands:
+        if m not in out:
+            out.append(m)
+    return out[:8]
+
+
+def get_machine_info(server_url=None):
+    """返回 (主物理 MAC, 全部物理 MAC 列表, 主机名)"""
+    local_ip = route_local_ip(server_url or SERVER)
+    macs = win_macs(local_ip) if WIN else linux_macs(local_ip)
+    if not macs:
+        node = uuid.getnode()
+        if not (node & (1 << 40)):  # 非随机生成的有效 MAC
+            m = norm_mac("%012x" % node)
+            if m:
+                macs = [m]
+    try:
+        host = socket.gethostname()[:40]
+    except Exception:
+        host = ""
+    return (macs[0] if macs else ""), macs, host
 
 
 # ---------------- 声音 ----------------
@@ -539,6 +744,8 @@ def open_path(path):
 
 def ensure_desktop_icon():
     """在桌面放"作业登记""考勤登记"图标，课代表、班长随时可以打开登记页"""
+    if not CLASS or not KEY:
+        return
     if WIN:  # Windows 用 .url 快捷方式；"班级看板"图标由 install.ps1 建（.lnk 要用 COM，标准库做不了）
         for name, url in (("作业登记", COLLECT_URL), ("考勤登记", ATTEND_URL)):
             write_url_shortcut(name, url)
@@ -2050,13 +2257,14 @@ class ToolTab:
     def use(self, body):
         self.close_panel()
         app = self.app
+        gen = app.session_gen
 
         def run():
             try:
                 req = urllib.request.Request(TOOL_URL, data=json.dumps({**body, "class": CLASS}).encode(),
                                              headers={"Content-Type": "application/json"})
                 urllib.request.urlopen(req, timeout=8).read()
-                app.inbox.put(("poll", fetch_json(POLL_URL)))  # 不等下一轮，马上把计时 / 抽号拉回来显示
+                app.inbox.put(("poll", (gen, fetch_json(POLL_URL))))  # 不等下一轮，马上把计时 / 抽号拉回来显示
             except urllib.error.HTTPError as e:
                 try:
                     msg = json.loads(e.read().decode("utf-8")).get("error") or str(e)
@@ -2074,6 +2282,323 @@ class ToolTab:
             self.win.destroy()
         except tk.TclError:
             pass
+
+
+# ---------------- 桌面云大屏选班绑定窗口 ----------------
+def extract_grade(cls_name):
+    """从班级名里提取年级前缀（如 高一、高二、初三、七年级、2026级），班级多时自动分组显示"""
+    m = re.match(r"^(高[一二三]|初[一二三]|[一二三四五六七八九]年级|\d{2,4}级)", str(cls_name or ""))
+    return m.group(1) if m else ""
+
+
+def group_classes(classes):
+    """班级超过 12 个且能分成 2 个以上年级时返回分组标签列表；否则返回空列表"""
+    if len(classes) <= 12:
+        return []
+    groups = {}
+    order = []
+    other = []
+    for c in classes:
+        g = extract_grade(c)
+        if g:
+            if g not in groups:
+                groups[g] = []
+                order.append(g)
+            groups[g].append(c)
+        else:
+            other.append(c)
+    if len(order) < 2:
+        return []
+    tabs = [("全部", classes)] + [(g, groups[g]) for g in order]
+    if other:
+        tabs.append(("其他", other))
+    return tabs
+
+
+class BindPill:
+    """点"暂不绑定"后缩在右下角的小入口，不挡上课；点一下重新打开选班窗口"""
+
+    def __init__(self, app):
+        self.app = app
+        self.w, self.h = 164, 44
+        self.win = tk.Toplevel(app.root)
+        self.win.overrideredirect(True)
+        self.win.attributes("-topmost", True)
+        self.win.geometry(f"{self.w}x{self.h}+{app.sw - self.w - 22}+{app.sh - self.h - 68}")
+        float_window(self.win)
+        cv = tk.Canvas(self.win, width=self.w, height=self.h, bg="#16a571", highlightthickness=0, cursor="hand2")
+        cv.pack()
+        cv.create_rectangle(0, 0, self.w - 1, self.h - 1, outline="#0f7a53")
+        cv.create_text(self.w / 2, self.h / 2, text="绑定本机班级", fill="#ffffff", font=app.font(17, True))
+        cv.bind("<Button-1>", lambda e: app.reopen_bind_window())
+
+    def close(self):
+        try:
+            self.win.destroy()
+        except tk.TclError:
+            pass
+
+
+class BindWindow:
+    """桌面云 / 启动还原一体机首次开机选班绑定窗口：支持 70+ 班级按年级筛选和分页点选，无需键盘"""
+
+    def __init__(self, app, state):
+        self.app = app
+        self.state = dict(state or {})
+        self.selected = None
+        self.active_tab = "全部"
+        self.page = 0
+        self.submitting = False
+        self.status_msg = ""
+        self.status_err = False
+        sw, sh = app.sw, app.sh
+        self.w, self.h = min(1320, int(sw * 0.84)), min(840, int(sh * 0.82))
+        self.x, self.y = (sw - self.w) // 2, (sh - self.h) // 2
+        self.backdrop = app.make_backdrop()
+        self.win = tk.Toplevel(app.root)
+        self.win.overrideredirect(True)
+        self.win.attributes("-topmost", True)
+        self.win.geometry(f"{self.w}x{self.h}+{self.x}+{self.y}")
+        float_window(self.win)
+        self.cv = tk.Canvas(self.win, width=self.w, height=self.h, bg="#ffffff", highlightthickness=0)
+        self.cv.pack()
+        self.draw()
+        app.fade_in(self.win)
+
+    def update_state(self, state):
+        self.state = dict(state or {})
+        avail = self.state.get("classes") or []
+        if self.selected not in avail:
+            self.selected = None
+        self.submitting = False
+        self.status_msg = ""
+        self.status_err = False
+        self.draw()
+
+    def set_status(self, msg, err=False):
+        self.status_msg = msg
+        self.status_err = err
+        self.submitting = False
+        self.draw()
+
+    def _pill_btn(self, x1, y1, x2, y2, text, fill, fg, cmd, px, outline="", tag=""):
+        r = (y2 - y1) / 2
+        tag = tag or f"b{id(cmd)}_{int(x1)}_{int(y1)}"
+        round_rect(self.cv, x1, y1, x2, y2, r, fill=fill, outline=outline or fill, width=1.5 if outline else 0, tags=tag)
+        self.cv.create_text((x1 + x2) / 2, (y1 + y2) / 2, text=text, fill=fg, font=self.app.font(px, True), tags=tag)
+        if cmd:
+            self.cv.tag_bind(tag, "<Button-1>", lambda e, fn=cmd: fn())
+            self.cv.tag_bind(tag, "<Enter>", lambda e: self.cv.config(cursor="hand2"))
+            self.cv.tag_bind(tag, "<Leave>", lambda e: self.cv.config(cursor=""))
+
+    def draw(self):
+        cv, w, h, app = self.cv, self.w, self.h, self.app
+        cv.delete("all")
+        band = max(58, int(h * 0.095))
+        pad = int(w * 0.04)
+        gradient(cv, 0, 0, w, band, "#3b9cf5", "#34d399")
+        cv.create_rectangle(0, 0, w - 1, h - 1, outline=LINE)
+        fs = max(18, int(band * 0.36))
+        cv.create_oval(fs * 0.7, band / 2 - fs * 0.42, fs * 1.54, band / 2 + fs * 0.42, fill="#ffffff", width=0)
+        cv.create_text(fs * 2.0, band / 2, text="班级助手 · 绑定本教室班级", anchor="w", fill="#ffffff", font=app.font(fs, True))
+        mac = self.state.get("mac") or "检测中…"
+        cv.create_text(w - pad, band / 2, text=f"本机 MAC：{mac}", anchor="e", fill="#ffffff", font=app.font(max(13, int(fs * 0.68))))
+
+        is_open = bool(self.state.get("open"))
+        classes = self.state.get("classes") or []
+        total = self.state.get("total_classes") or len(classes)
+        bound_n = self.state.get("bound_count") or 0
+        sub_px = max(15, int(h * 0.024))
+        sub_y = band + int(h * 0.048)
+
+        foot_h = max(72, int(h * 0.125))
+        foot_top = h - foot_h
+        cv.create_line(pad, foot_top, w - pad, foot_top, fill=LINE, dash=(3, 3))
+
+        pages = 1
+        if not is_open:
+            msg = self.state.get("message") or "管理员暂未开放大屏选班绑定，请在工作台「班级管理」里开启后重试"
+            cx, cy = w / 2, (band + foot_top) / 2
+            cv.create_oval(cx - 34, cy - 86, cx + 34, cy - 18, fill="#fff3dc", outline="#f5a524", width=2)
+            cv.create_text(cx, cy - 52, text="!", fill="#d97706", font=app.font(34, True))
+            cv.create_text(cx, cy + 16, text="暂未开放大屏选班绑定", fill=INK, font=app.font(max(22, int(h * 0.036)), True))
+            cv.create_text(cx, cy + 62, text=msg, fill=MUTED, font=app.font(max(15, int(h * 0.023))), width=w - pad * 3, justify="center")
+            cv.create_text(cx, cy + 104, text="开启后本页面会自动刷新（每 10 秒检查一次），也可点击下方「刷新」立即检查", fill="#94a3b8", font=app.font(max(13, int(h * 0.019))))
+        elif not classes:
+            cx, cy = w / 2, (band + foot_top) / 2
+            cv.create_oval(cx - 34, cy - 86, cx + 34, cy - 18, fill="#e7f7f0", outline="#16a571", width=2)
+            cv.create_line(cx - 14, cy - 52, cx - 3, cy - 41, cx + 16, cy - 62, fill="#16a571", width=4, capstyle="round", joinstyle="round")
+            title = "所有班级都已绑定大屏" if total else "还没有创建任何班级"
+            desc = (f"全校共 {total} 个班，已全部绑定。如需给某个班换教室，请管理员在工作台「班级管理」先点「解绑大屏」，再点下方刷新。"
+                    if total else "请管理员先在工作台「班级管理」添加班级，再点下方「刷新」。")
+            cv.create_text(cx, cy + 16, text=title, fill=INK, font=app.font(max(22, int(h * 0.036)), True))
+            cv.create_text(cx, cy + 66, text=desc, fill=MUTED, font=app.font(max(15, int(h * 0.023))), width=w - pad * 3, justify="center")
+        else:
+            sub = f"请点选这台一体机所在的班级（共 {total} 个班，已绑 {bound_n} 个，待绑 {len(classes)} 个）"
+            cv.create_text(pad, sub_y, text=sub, anchor="w", fill=MUTED, font=app.font(sub_px))
+
+            tabs = group_classes(classes)
+            grid_top = sub_y + int(h * 0.042)
+            shown = classes
+            if tabs:
+                tab_names = [t[0] for t in tabs]
+                if self.active_tab not in tab_names:
+                    self.active_tab = "全部"
+                tab_y = sub_y + int(h * 0.038)
+                tab_h = max(36, int(h * 0.052))
+                tab_px = max(14, int(h * 0.021))
+                tf = app.font(tab_px, True)
+                tx = pad
+                for gname, gitems in tabs:
+                    label = f"{gname} ({len(gitems)})"
+                    tw = tf.measure(label) + 28
+                    if tx + tw > w - pad:
+                        break
+                    on = gname == self.active_tab
+                    self._pill_btn(tx, tab_y, tx + tw, tab_y + tab_h, label,
+                                   "#16a571" if on else "#f1f5f9", "#ffffff" if on else "#334155",
+                                   lambda g=gname: self.pick_tab(g), tab_px,
+                                   outline="" if on else "#dde5ee", tag=f"tab_{gname}")
+                    tx += tw + 10
+                    if on:
+                        shown = gitems
+                grid_top = tab_y + tab_h + int(h * 0.024)
+
+            status_room = int(h * 0.044) if self.status_msg else int(h * 0.018)
+            grid_bottom = foot_top - status_room
+            cols = 5 if w >= 960 else 4 if w >= 720 else 3
+            rows = 5 if (grid_bottom - grid_top) >= 340 else 4 if (grid_bottom - grid_top) >= 250 else 3
+            per_page = max(1, cols * rows)
+            pages = max(1, (len(shown) + per_page - 1) // per_page)
+            self.page = max(0, min(self.page, pages - 1))
+            page_items = shown[self.page * per_page:(self.page + 1) * per_page]
+
+            gx, gy = max(10, int(w * 0.013)), max(10, int(h * 0.016))
+            cw = (w - 2 * pad - gx * (cols - 1)) / cols
+            ch = min(68, (grid_bottom - grid_top - gy * (rows - 1)) / rows)
+            cpx = max(15, min(22, int(ch * 0.36)))
+            cf = app.font(cpx, True)
+            for idx, cname in enumerate(page_items):
+                r_i, c_i = divmod(idx, cols)
+                x1 = pad + c_i * (cw + gx)
+                y1 = grid_top + r_i * (ch + gy)
+                sel = cname == self.selected
+                tag = f"cls_{idx}"
+                round_rect(cv, x1, y1, x1 + cw, y1 + ch, 12,
+                           fill="#e7f7f0" if sel else "#ffffff",
+                           outline="#16a571" if sel else "#dce5ee",
+                           width=2.5 if sel else 1.5, tags=tag)
+                if sel:  # 选中态用矢量小绿点对勾，避免老系统字体缺少符号变方框
+                    r0 = min(10, ch * 0.18)
+                    cx0, cy0 = x1 + 20 + r0, y1 + ch / 2
+                    cv.create_oval(cx0 - r0, cy0 - r0, cx0 + r0, cy0 + r0, fill="#16a571", width=0, tags=tag)
+                    cv.create_line(cx0 - r0 * 0.45, cy0, cx0 - r0 * 0.1, cy0 + r0 * 0.4, cx0 + r0 * 0.5, cy0 - r0 * 0.35,
+                                   fill="#ffffff", width=2.2, capstyle="round", joinstyle="round", tags=tag)
+                    label = ellipsis(cname, cf, cw - 36 - r0 * 2)
+                    cv.create_text(x1 + cw / 2 + r0 * 0.6, y1 + ch / 2, text=label, fill="#0f7a53", font=cf, tags=tag)
+                else:
+                    label = ellipsis(cname, cf, cw - 18)
+                    cv.create_text(x1 + cw / 2, y1 + ch / 2, text=label, fill=INK, font=cf, tags=tag)
+                cv.tag_bind(tag, "<Button-1>", lambda e, c=cname: self.select_class(c))
+                cv.tag_bind(tag, "<Enter>", lambda e: cv.config(cursor="hand2"))
+                cv.tag_bind(tag, "<Leave>", lambda e: cv.config(cursor=""))
+
+            if self.status_msg:
+                cv.create_text(pad, foot_top - status_room / 2, text=self.status_msg, anchor="w",
+                               fill="#dc2626" if self.status_err else "#0f7a53", font=app.font(max(14, int(h * 0.02))))
+
+        # 底部操作栏：左侧分页或提示，右侧按钮
+        bpx = max(15, min(21, int(foot_h * 0.27)))
+        bf = app.font(bpx, True)
+        bh = max(42, int(foot_h * 0.58))
+        by1, by2 = foot_top + (foot_h - bh) / 2, foot_top + (foot_h + bh) / 2
+
+        if pages > 1:
+            px1 = pad
+            pw = bf.measure("上一页") + 32
+            self._pill_btn(px1, by1, px1 + pw, by2, "上一页",
+                           "#f1f5f9" if self.page > 0 else "#f8fafc",
+                           INK if self.page > 0 else "#cbd5e1",
+                           self.prev_page if self.page > 0 else None, bpx, outline="#dce5ee", tag="pg_prev")
+            mid_x = px1 + pw + 48
+            cv.create_text(mid_x, (by1 + by2) / 2, text=f"{self.page + 1} / {pages}", fill=MUTED, font=bf)
+            px2 = mid_x + 48
+            self._pill_btn(px2, by1, px2 + pw, by2, "下一页",
+                           "#f1f5f9" if self.page + 1 < pages else "#f8fafc",
+                           INK if self.page + 1 < pages else "#cbd5e1",
+                           self.next_page if self.page + 1 < pages else None, bpx, outline="#dce5ee", tag="pg_next")
+        elif is_open and classes and not self.status_msg:
+            cv.create_text(pad, (by1 + by2) / 2, text="绑定关系保存在服务器，电脑重启还原也不受影响",
+                           anchor="w", fill="#94a3b8", font=app.font(max(13, int(bpx * 0.82))))
+
+        rx = w - pad
+        if is_open and classes:
+            if self.submitting:
+                lbl, bg, fn = "正在绑定…", "#86d3b3", None
+            elif self.selected:
+                lbl, bg, fn = f"确认绑定「{self.selected}」", "#16a571", self.confirm_bind
+            else:
+                lbl, bg, fn = "请先点选班级", "#b9d7ca", None
+            bw = max(160, bf.measure(lbl) + 38)
+            self._pill_btn(rx - bw, by1, rx, by2, lbl, bg, "#ffffff", fn, bpx, tag="btn_confirm")
+            rx -= bw + 12
+
+        rw = bf.measure("刷新") + 34
+        self._pill_btn(rx - rw, by1, rx, by2, "刷新", "#eef3f8", INK, self.refresh, bpx, outline="#dce5ee", tag="btn_refresh")
+        rx -= rw + 12
+
+        hw = bf.measure("暂不绑定") + 30
+        self._pill_btn(rx - hw, by1, rx, by2, "暂不绑定", "#f8fafc", MUTED, self.minimize, bpx, outline="#e2e8f0", tag="btn_later")
+
+    def pick_tab(self, g):
+        self.active_tab = g
+        self.page = 0
+        self.draw()
+
+    def select_class(self, c):
+        if self.submitting:
+            return
+        self.selected = c
+        self.status_msg = ""
+        self.status_err = False
+        self.draw()
+
+    def prev_page(self):
+        if self.page > 0:
+            self.page -= 1
+            self.draw()
+
+    def next_page(self):
+        self.page += 1
+        self.draw()
+
+    def refresh(self):
+        if self.submitting:
+            return
+        self.status_msg = "正在刷新班级列表…"
+        self.status_err = False
+        self.draw()
+        self.app.trigger_device_check(force_show=True)
+
+    def confirm_bind(self):
+        if not self.selected or self.submitting:
+            return
+        self.submitting = True
+        self.status_msg = f"正在绑定「{self.selected}」…"
+        self.status_err = False
+        self.draw()
+        self.app.submit_device_bind(self.selected)
+
+    def minimize(self):
+        self.app.minimize_bind_window()
+
+    def close(self):
+        for w in (self.win, self.backdrop):
+            try:
+                if w:
+                    w.destroy()
+            except tk.TclError:
+                pass
 
 
 class App:
@@ -2098,6 +2623,15 @@ class App:
         self.exam, self.exam_played, self.exam_rev, self.awake_at = None, set(), None, 0  # 考试大屏、已播报过的提示、考试安排的版本
         self.handled = set()
         self.pending_restart = False
+        self.auto_mode = AUTO_MODE
+        self.bound = bool(CLASS and KEY)
+        self.session_gen = 0
+        self.bind_win = None
+        self.bind_pill = None
+        self.bind_minimized = False
+        self.bind_state = {}
+        self.device_wake = threading.Event()
+        self.bind_force_show = False
         self.fonts = {}
         fams = set(tkfont.families())
         fallback = next((f for f in ("Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "Droid Sans Fallback",
@@ -2107,18 +2641,22 @@ class App:
         self.family_fallback = fallback
         self.family = "MiSans" if "MiSans" in fams else fallback
         self.font_installing = set()
-        if "--restarted" not in sys.argv:  # 自动更新、装字体后的重启不再提示
+        if self.bound and "--restarted" not in sys.argv:  # 自动更新、装字体后的重启不再提示
             hello = MessageCard(self, {"id": 0, "text": f"{CLASS} 接收端已启动", "sender": "班级助手", "time": time.strftime("%H:%M"), "popup": False})
             hello.place(0)
             self.root.after(4000, hello.close)
-        threading.Thread(target=ensure_desktop_icon, daemon=True).start()
+        if self.bound:
+            threading.Thread(target=ensure_desktop_icon, daemon=True).start()
         threading.Thread(target=clean_files, daemon=True).start()
         threading.Thread(target=guard_loop, daemon=True).start()
-        for target in (self.poll_loop, self.board_loop, self.update_loop):
+        threads = [self.poll_loop, self.board_loop, self.update_loop]
+        if self.auto_mode:
+            threads.append(self.device_loop)
+        for target in threads:
             threading.Thread(target=target, daemon=True).start()
         self.root.after(200, self.process)
         self.root.after(3000, self.check_standby)
-        log(f"接收端 v2 启动：班级={CLASS} 服务器={SERVER} 字体={self.family} 声音={'系统自带（winmm）' if WIN else 'ffplay' if FFPLAY else os.path.basename(APLAY) + '（只能放 wav）' if APLAY else '无'} "
+        log(f"接收端 v2 启动：模式={'桌面云自动认班' if self.auto_mode else '单班'} 班级={CLASS or '(待绑定)'} 服务器={SERVER} 字体={self.family} 声音={'系统自带（winmm）' if WIN else 'ffplay' if FFPLAY else os.path.basename(APLAY) + '（只能放 wav）' if APLAY else '无'} "
             f"空闲检测={'可用' if self.x11.ok else '不可用'} 窗口特效={'有' if self.x11.composite else '无'}")
 
     def font(self, px, bold=False, digits=False):
@@ -2164,12 +2702,29 @@ class App:
     def poll_loop(self):
         fails = 0
         while True:
+            if not self.bound or not POLL_URL:
+                fails = 0
+                time.sleep(1)
+                continue
+            gen, url = self.session_gen, POLL_URL
             try:
-                data = fetch_json(POLL_URL)
+                data = fetch_json(url)
                 if fails:
                     log("已重新连接服务器")
                 fails = 0
-                self.inbox.put(("poll", data))
+                if data.get("rebind") and self.auto_mode:
+                    self.inbox.put(("rebind", (gen, "服务器已解除本机绑定")))
+                    time.sleep(1)
+                    continue
+                self.inbox.put(("poll", (gen, data)))
+            except urllib.error.HTTPError as e:
+                if e.code == 403 and self.auto_mode:
+                    self.inbox.put(("rebind", (gen, "教室密钥已变更，重新校验绑定")))
+                    time.sleep(2)
+                    continue
+                fails += 1
+                if fails == 1 or fails % 30 == 0:
+                    log(f"连接服务器失败（第 {fails} 次）：{e}")
             except Exception as e:
                 fails += 1
                 if fails == 1 or fails % 30 == 0:
@@ -2177,18 +2732,146 @@ class App:
             time.sleep(2)
 
     def fetch_board_now(self):
+        if not self.bound or not BOARD_URL:
+            return
+        gen, url = self.session_gen, BOARD_URL
         try:
-            self.inbox.put(("board", fetch_json(BOARD_URL)))
+            self.inbox.put(("board", (gen, fetch_json(url))))
         except Exception as e:
             log(f"拉取看板失败：{e}")
 
     def board_loop(self):
         while True:
+            if self.bound and BOARD_URL:
+                gen, url = self.session_gen, BOARD_URL
+                try:
+                    self.inbox.put(("board", (gen, fetch_json(url))))
+                except Exception:
+                    pass
+                time.sleep(60)
+            else:
+                time.sleep(2)
+
+    def device_loop(self):
+        """桌面云自动认班循环：开机上报本机网卡 MAC，已绑定直接接入，未绑定则弹出选班窗口"""
+        fails = 0
+        while True:
+            if self.bound:
+                self.device_wake.wait(5)
+                self.device_wake.clear()
+                fails = 0
+                continue
+            self.device_wake.clear()
+            force = self.bind_force_show
+            self.bind_force_show = False
+            wait = 10
             try:
-                self.inbox.put(("board", fetch_json(BOARD_URL)))
-            except Exception:
-                pass
-            time.sleep(60)
+                mac, macs, host = get_machine_info(SERVER)
+                if not mac:
+                    log("未能读取本机网卡 MAC 地址，3 秒后重试")
+                    wait = 3
+                else:
+                    code, data = post_json(f"{SERVER}/api/device/check", {"mac": mac, "macs": macs, "hostname": host})
+                    if code == 200 and isinstance(data, dict):
+                        fails = 0
+                        data["_force"] = force
+                        self.inbox.put(("device_check", data))
+                        wait = 10 if not data.get("open") else 30
+                    else:
+                        fails += 1
+                        if fails == 1 or fails % 20 == 0:
+                            log(f"检查设备绑定失败（HTTP {code}）：{data}")
+                        wait = 5
+            except Exception as e:
+                fails += 1
+                if fails == 1 or fails % 20 == 0:
+                    log(f"连接服务器检查绑定失败（第 {fails} 次）：{e}")
+                wait = 3
+            self.device_wake.wait(wait)
+
+    def trigger_device_check(self, force_show=False):
+        if force_show:
+            self.bind_force_show = True
+        self.device_wake.set()
+
+    def submit_device_bind(self, cls_name):
+        mac = self.bind_state.get("mac") or get_machine_info(SERVER)[0]
+        try:
+            host = socket.gethostname()[:40]
+        except Exception:
+            host = ""
+
+        def run():
+            try:
+                code, data = post_json(f"{SERVER}/api/device/bind", {"mac": mac, "class": cls_name, "hostname": host})
+                self.inbox.put(("device_bind", (code, data, cls_name)))
+            except Exception as e:
+                self.inbox.put(("device_bind", (0, {"error": f"网络异常，请稍后重试（{e}）"}, cls_name)))
+        threading.Thread(target=run, daemon=True).start()
+
+    def activate_class(self, cls_name, key, mac, manual=False):
+        self.session_gen += 1
+        set_binding(cls_name, key, mac)
+        self.bound = True
+        self.bind_minimized = False
+        if self.bind_win:
+            self.bind_win.close()
+            self.bind_win = None
+        if self.bind_pill:
+            self.bind_pill.close()
+            self.bind_pill = None
+        threading.Thread(target=ensure_desktop_icon, daemon=True).start()
+        threading.Thread(target=self.fetch_board_now, daemon=True).start()
+        if manual or "--restarted" not in sys.argv:
+            msg = f"已绑定 {cls_name}，接收端已启动" if manual else f"{cls_name} 接收端已启动"
+            hello = MessageCard(self, {"id": 0, "text": msg, "sender": "班级助手", "time": time.strftime("%H:%M"), "popup": False})
+            hello.place(0)
+            self.root.after(4000, hello.close)
+        log(f"大屏已关联班级：{cls_name}（MAC={mac}，方式={'手动选班' if manual else '开机自动认班'}）")
+
+    def deactivate_class(self, reason=""):
+        self.session_gen += 1
+        set_binding("", "", "")
+        self.bound = False
+        self.board = {}
+        self.desk_sig = None
+        self.exam_rev = None
+        self.in_class = False
+        for mid in list(self.cards):
+            self.close(mid)
+        self.hide_standby()
+        self.hide_morning()
+        if self.deskb:
+            self.deskb.close()
+            self.deskb = None
+        if self.exam:
+            self.exam.close()
+            self.exam = None
+            self.x11.allow_sleep()
+        if self.tooltab:
+            self.tooltab.destroy()
+            self.tooltab = None
+        self.bind_minimized = False
+        log(f"大屏绑定已解除（{reason}），重新检查绑定状态")
+        self.trigger_device_check(force_show=True)
+
+    def minimize_bind_window(self):
+        self.bind_minimized = True
+        if self.bind_win:
+            self.bind_win.close()
+            self.bind_win = None
+        if not self.bind_pill and not self.bound:
+            self.bind_pill = BindPill(self)
+
+    def reopen_bind_window(self):
+        self.bind_minimized = False
+        if self.bind_pill:
+            self.bind_pill.close()
+            self.bind_pill = None
+        if not self.bound:
+            if self.bind_state:
+                self.bind_win = BindWindow(self, self.bind_state)
+            self.trigger_device_check(force_show=True)
 
     def update_loop(self):
         """自动更新：服务器上的接收程序变了，就下载新版并重启"""
@@ -2247,17 +2930,55 @@ class App:
             while True:
                 kind, data = self.inbox.get_nowait()
                 if kind == "poll":
+                    gen, payload = data if isinstance(data, tuple) else (self.session_gen, data)
+                    if gen != self.session_gen or not self.bound:
+                        continue
                     try:
-                        self.apply(data)
+                        self.apply(payload)
                     except Exception as e:  # 出错也不能停：否则之后的消息都不显示了
                         log(f"处理消息出错：{e}")
+                elif kind == "rebind":
+                    gen, reason = data
+                    if gen == self.session_gen and self.bound:
+                        self.deactivate_class(reason)
+                elif kind == "device_check":
+                    if self.bound:
+                        continue
+                    force = bool(data.pop("_force", False))
+                    if data.get("bound") and data.get("class") and data.get("key"):
+                        self.activate_class(data["class"], data["key"], data.get("mac", ""), manual=False)
+                        continue
+                    prev_open = self.bind_state.get("open")
+                    self.bind_state = data
+                    if self.bind_minimized and not force:
+                        if not self.bind_pill:
+                            self.bind_pill = BindPill(self)
+                    elif self.bind_win:
+                        # 选班窗开着且用户正在挑选时不打断；只有手动点刷新、或开关状态变化时才刷新界面
+                        if force or prev_open != data.get("open"):
+                            self.bind_win.update_state(data)
+                    else:
+                        if self.bind_pill:
+                            self.bind_pill.close()
+                            self.bind_pill = None
+                        self.bind_win = BindWindow(self, data)
+                elif kind == "device_bind":
+                    code, resp, cls_name = data
+                    if code == 200 and isinstance(resp, dict) and resp.get("bound") and resp.get("key"):
+                        self.activate_class(resp.get("class") or cls_name, resp["key"], resp.get("mac", ""), manual=True)
+                    elif self.bind_win:
+                        err = (resp or {}).get("error") or "绑定失败，请点刷新后重试"
+                        self.bind_win.set_status(err, err=True)
                 elif kind == "tip":  # 大屏工具出错（如没有名单）：角落小提示几秒
                     tip = MessageCard(self, {"id": 0, "text": data, "sender": "班级助手", "time": time.strftime("%H:%M"), "popup": False})
                     tip.place(0)
                     self.root.after(5000, tip.close)
                 else:
-                    self.board = data
-                    key = data.get("screen_font") or "misans"
+                    gen, payload = data if isinstance(data, tuple) else (self.session_gen, data)
+                    if gen != self.session_gen or not self.bound:
+                        continue
+                    self.board = payload
+                    key = payload.get("screen_font") or "misans"
                     want = self.family_fallback
                     if key in SCREEN_FONTS:
                         found = [n for n in SCREEN_FONTS[key][0] if n in self.families]
@@ -2270,7 +2991,7 @@ class App:
                         self.family, self.fonts = want, {}
         except queue.Empty:
             pass
-        if self.pending_restart and not self.cards and not self.exam:  # 考试时不重启
+        if self.pending_restart and not self.cards and not self.exam and not self.bind_win:  # 考试、选班时不重启
             log("重启以加载新版本 / 新字体")
             if WIN:  # Windows 的 execv 是另起一个进程：先放开"只运行一个"的锁，再启动新进程、退出自己
                 MUTEX[1].CloseHandle(MUTEX[0])
@@ -2433,6 +3154,9 @@ class App:
         self.desk_sig = sig
 
     def check_standby(self):
+        if not self.bound:
+            self.root.after(3000, self.check_standby)
+            return
         try:
             self.sync_tooltab()
         except Exception as e:
