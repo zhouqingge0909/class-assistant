@@ -57,6 +57,8 @@ cd class-assistant
 sudo bash setup.sh
 ```
 
+> **如果服务器访问 GitHub 慢或连不上**：也可以从 [百度网盘](https://pan.baidu.com/s/1JpNC8Hk_eBG2Oeu_AveWng?pwd=x7pe)（提取码 `x7pe`，文件 `class-assistant-cloud.zip`）下载压缩包，里面带《小白安装说明》和安装包 `class-assistant-cloud.tar.gz`，上传到服务器后一行命令即可完成安装（完全不依赖 GitHub，也不需要校园网，教室一体机和手机连普通外网/流量都能用）。
+
 大约 5 分钟装好，最后会显示**工作台地址**和**管理员密码**。用浏览器打开工作台地址登录，建班、填名单，然后在工作台「班级管理」里点「一体机」，把安装命令复制到教室一体机上运行即可。
 
 以后要更新：在 `class-assistant` 文件夹里 `git pull`，再运行一次 `sudo bash setup.sh`，班级数据和密码都会保留。
