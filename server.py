@@ -444,6 +444,7 @@ settings.setdefault("cls_cfg", {})       # 班级 -> 大屏设置（倒计时、
 pick_history = {}                        # 班级 -> 最近被抽到的名字（避免连续重复）
 last_seen = {}                           # 班级 -> 最近一次轮询时间
 shots, shot_req = {}, {}                 # 看大屏：班级 -> {img, type, at, err}（只在内存里，2 分钟后作废）；班级 -> 老师点"看一眼"的时间
+file_batches = {}                        # 群发文件预处理：batch_id -> {uid, classes, skipped, name, exp}（只在内存里，5 分钟过期）
 login_fails = {}                         # ip -> [失败次数, 首次失败时间]
 reg_counts = {}                          # ip -> [日期, 今天注册次数]
 send_log = {}                            # 老师 uid -> 最近一小时上大屏的时间戳（公共模式限频）
@@ -668,7 +669,8 @@ def today():
 
 
 def create_messages(classes, text, sender, voice=False, urgent=False, defer=False, voice_name=None,
-                    kind="call", data=None, expire_at=None, say=None, repeat=None, who=None, loud=False, send_at=None):
+                    kind="call", data=None, expire_at=None, say=None, repeat=None, who=None, loud=False, send_at=None,
+                    data_by_class=None):
     """所有推送到教室大屏的内容（喊话、作业、提醒、课堂工具）都走这里；send_at：老师定时发送的时间"""
     now = time.time()
     def deliver_time(cls):  # 上课时间的普通消息，等到这个班下课再送（晚自习不等：值班老师要马上看到）
@@ -693,7 +695,7 @@ def create_messages(classes, text, sender, voice=False, urgent=False, defer=Fals
             at = deliver_time(cls)
             deliver_at = max(deliver_at, at)
             messages.append({"id": nid, "class": cls, "text": text, "sender": sender, "kind": kind,
-                             "data": data, "voice": bool(voice), "urgent": bool(urgent), "audio": audio,
+                             "data": data_by_class[cls] if data_by_class else data, "voice": bool(voice), "urgent": bool(urgent), "audio": audio,
                              "created": now, "deliver_at": at, "expire_at": expire_at,
                              "delivered_at": None, "acked_at": None, "who": who, "loud": bool(loud and voice), "send_at": send_at,
                              "speak": "。".join([say or text] * max(1, int(repeat or CFG["tts_repeat"]))) if voice else None})
@@ -1170,6 +1172,17 @@ def class_key(cls):
     return users["class_keys"].get(cls) or (None if PUBLIC else CFG["classroom_key"])
 
 
+def files_disk_bytes():
+    """发到大屏的文件实际占用的硬盘字节数（群发硬链接共享同一份磁盘块，只算一次）"""
+    seen, total = set(), 0
+    for f in files:
+        k = f.get("blob") or f["id"]
+        if k not in seen:
+            seen.add(k)
+            total += f["size"]
+    return total
+
+
 def purge_files(cls=None):
     """删掉过期（7 天）的文件；给了 cls 就把这个班的文件全删（调用时已持有 lock）"""
     cutoff = time.time() - FILE_KEEP_DAYS * 86400
@@ -1413,10 +1426,15 @@ def reminder_loop():
                     write_json(REMINDER_PATH, reminders)
             check_prep(dt)
             for r in due:
-                for cls in r["classes"]:
-                    create_messages([cls], r["text"].replace("{值日}", duty_text(cls)),
-                                    r.get("creator", "定时提醒"), voice=r.get("voice"),
-                                    urgent=r.get("urgent"), voice_name=r.get("voice_name"), kind="reminder")
+                if "{值日}" in r["text"]:
+                    for cls in r["classes"]:
+                        create_messages([cls], r["text"].replace("{值日}", duty_text(cls)),
+                                        r.get("creator", "定时提醒"), voice=r.get("voice"),
+                                        urgent=r.get("urgent"), voice_name=r.get("voice_name"), kind="reminder")
+                else:
+                    create_messages(r["classes"], r["text"], r.get("creator", "定时提醒"),
+                                    voice=r.get("voice"), urgent=r.get("urgent"),
+                                    voice_name=r.get("voice_name"), kind="reminder")
         except Exception as e:
             print("定时提醒出错：", e)
         time.sleep(15)
@@ -1548,18 +1566,24 @@ class Handler(BaseHTTPRequestHandler):
         s = self.sess()
         admin, owner = is_admin(s), is_owner(s)
         cls_of = lambda items, key="id": next((x["class"] for x in items if x["id"] == body.get(key)), None)
-        teacher_level = {"/api/board/show", "/api/homework/add", "/api/morning/add", "/api/notes/add", "/api/homework/push", "/api/collect/start", "/api/collect/remind",
+        teacher_level = {"/api/board/show", "/api/homework/add", "/api/morning/add", "/api/homework/push", "/api/collect/start", "/api/collect/remind",
                          "/api/tools/timer", "/api/tools/pick", "/api/image/push", "/api/quiz/import", "/api/quiz/save"}
         head_level = {"/api/screen/shot", "/api/points/add", "/api/duty/push", "/api/attend/start", "/api/settings", "/api/classroom/uninstall"}
         if path in teacher_level:
             return None if self.allowed(str(body.get("class") or ""), "teacher") else "teacher"
         if path in head_level:
             return None if self.allowed(str(body.get("class") or ""), "head") else "head"
+        if path in ("/api/notes/add", "/api/files/prepare"):
+            cs = body.get("classes") if isinstance(body.get("classes"), list) else ([body.get("class")] if body.get("class") else [])
+            return None if cs and all(self.allowed(str(c), "teacher") for c in cs) else "teacher"
         if path == "/api/send":
             return None if body.get("classes") and all(self.allowed(str(c), "teacher") for c in body["classes"]) else "teacher"
         if path == "/api/recall":
-            c = cls_of(messages)
-            return None if c and self.allowed(c, "teacher") else "teacher"
+            ids = body.get("ids") if isinstance(body.get("ids"), list) else ([body.get("id")] if body.get("id") is not None else [])
+            if not ids:
+                return "teacher"
+            by_id = {m["id"]: m["class"] for m in messages}
+            return None if all(i in by_id and self.allowed(by_id[i], "teacher") for i in ids) else "teacher"
         if path in ("/api/notes/delete", "/api/notes/edit"):  # 自己的留言自己删改；班主任能删改本班所有留言
             n = next((x for x in notes if x["id"] == body.get("id")), None)
             return None if n and (self.allowed(n["class"], "head") or (s and n.get("uid") == s["uid"])) else "own"
@@ -2118,7 +2142,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/morning/add": self.api_morning_add, "/api/morning/delete": self.api_morning_delete,
             "/api/exams/save": self.api_exam_save, "/api/exams/delete": self.api_exam_delete, "/api/exams/end": self.api_exam_end,
             "/api/notes/add": self.api_note_add, "/api/notes/edit": self.api_note_edit, "/api/notes/delete": self.api_note_delete,
-            "/api/files/delete": self.api_file_delete,
+            "/api/files/prepare": self.api_file_prepare, "/api/files/delete": self.api_file_delete,
             "/api/admin/password": self.api_admin_password, "/api/admins/set": self.api_admins_set,
             "/api/device/toggle": self.api_device_toggle, "/api/device/unbind": self.api_device_unbind,
             "/api/backup/now": lambda body, sender: self.send_json({"ok": True, "name": make_backup(), "items": list_backups()}),
@@ -2326,23 +2350,41 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"ok": True, "item": item})
 
     def api_note_add(self, body, sender):
-        cls = str(body.get("class") or "")
+        raw_cs = body.get("classes") if isinstance(body.get("classes"), list) else [body.get("class")]
+        students = load_students()
+        classes = list(dict.fromkeys(str(c).strip() for c in raw_cs if str(c or "").strip() in students))
         text = re.sub(r"\s+", " ", str(body.get("text") or "")).strip()[:120]
         subject = str(body.get("subject") or "").strip()[:6]
+        if not classes:
+            return self.send_json({"error": "请选择班级"}, 400)
+        if PUBLIC and len(classes) > 1:
+            return self.send_json({"error": "公共服务器不支持多班群发"}, 403)
         if not text:
             return self.send_json({"error": "请填写留言内容"}, 400)
         d = now_cn().date()
         until = {"today": d, "week": d + timedelta(days=6 - d.weekday())}.get(body.get("keep"))  # 今天 / 到本周日 / 一直显示
+        until_s = until.strftime("%Y-%m-%d") if until else ""
+        now, uid = time.time(), self.sess()["uid"]
+        added, skipped = [], []
         with lock:
-            if len(notes_of(cls)) >= 8:
+            if len(classes) == 1 and len(notes_of(classes[0])) >= 8:
                 return self.send_json({"error": "这个班的留言已经有 8 条了，先删掉几条旧的"}, 400)
-            item = {"id": next_id(notes), "class": cls, "text": text, "subject": subject, "teacher": sender,
-                    "uid": self.sess()["uid"], "created": time.time(), "until": until.strftime("%Y-%m-%d") if until else ""}
-            notes.append(item)
+            nid = next_id(notes)
+            for cls in classes:
+                if len(notes_of(cls)) >= 8:
+                    skipped.append(cls)
+                    continue
+                item = {"id": nid, "class": cls, "text": text, "subject": subject, "teacher": sender,
+                        "uid": uid, "created": now, "until": until_s}
+                notes.append(item)
+                added.append(item)
+                nid += 1
+            if not added:
+                return self.send_json({"error": "所选班级的留言都已经有 8 条了，请先删掉一些旧的"}, 400)
             cutoff = (now_cn() - timedelta(days=30)).strftime("%Y-%m-%d")
             notes[:] = [n for n in notes if not n.get("until") or n["until"] >= cutoff]
             write_json(NOTES_PATH, notes)
-        self.send_json({"ok": True, "item": item})
+        self.send_json({"ok": True, "item": added[0], "items": added, "count": len(added), "skipped": skipped})
 
     def api_note_edit(self, body, sender):
         text = re.sub(r"\s+", " ", str(body.get("text") or "")).strip()[:120]
@@ -2450,10 +2492,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"ok": True})
 
     def api_send(self, body, sender):
-        classes = [str(c) for c in body.get("classes") or [] if str(c).strip()]
+        students = load_students()
+        classes = list(dict.fromkeys(str(c).strip() for c in body.get("classes") or [] if str(c or "").strip() in students))
         text = str(body.get("text") or "").strip()
         if not classes or not text:
             return self.send_json({"error": "请选择班级并填写内容"}, 400)
+        if PUBLIC and len(classes) > 1:
+            return self.send_json({"error": "公共服务器不支持多班群发"}, 403)
         if PUBLIC and len(text) > TEXT_LIMIT:
             return self.send_json({"error": f"消息最长 {TEXT_LIMIT} 字"}, 400)
         text = text[:300]
@@ -2597,9 +2642,12 @@ class Handler(BaseHTTPRequestHandler):
         text = str(body.get("text") or "").strip()[:200]
         hm = str(body.get("time") or "")
         days = sorted({int(d) for d in body.get("days") or [] if 1 <= int(d) <= 7})
-        classes = [str(c) for c in body.get("classes") or [] if str(c).strip()]
+        students = load_students()
+        classes = list(dict.fromkeys(str(c).strip() for c in body.get("classes") or [] if str(c or "").strip() in students))
         if not text or not re_hm(hm) or not days or not classes:
             return self.send_json({"error": "请填写时间、重复日期和提醒内容"}, 400)
+        if PUBLIC and len(classes) > 1:
+            return self.send_json({"error": "公共服务器不支持多班群发"}, 403)
         with lock:
             r = next((x for x in reminders if x["id"] == body.get("id")), None)
             full = [c for c in classes if sum(c in x["classes"] for x in reminders if x is not r) >= REMINDER_LIMIT]
@@ -2807,17 +2855,72 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"error": "无法读取这张图片，请换一张试试"}, 400)
         self.send_json({"ok": True, "img": f"/img/{name}.png", "w": w, "h": h})
 
+    def api_file_prepare(self, body, sender):
+        """群发文件前先校验目标班级、权限和空间，返回临时 batch 编号，避免把几十个中文班名塞进 URL"""
+        raw_cs = body.get("classes") if isinstance(body.get("classes"), list) else [body.get("class")]
+        students = load_students()
+        classes = list(dict.fromkeys(str(c).strip() for c in raw_cs if str(c or "").strip() in students))
+        if not classes:
+            return self.send_json({"error": "请选择班级"}, 400)
+        if PUBLIC and len(classes) > 1:
+            return self.send_json({"error": "公共服务器不支持多班群发"}, 403)
+        name = os.path.basename(str(body.get("name") or "").replace("\\", "/")).strip()
+        name = re.sub(r'[\x00-\x1f<>:"|?*]', "_", name)[:80]
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        if ext not in FILE_EXTS:
+            return self.send_json({"error": "只能发 Word、PDF、PPT、Excel、网页、图片、mp4 视频这类文件"}, 400)
+        try:
+            length = int(body.get("size") or 0)
+        except (TypeError, ValueError):
+            length = 0
+        if length <= 0:
+            return self.send_json({"error": "文件是空的"}, 400)
+        if length > FILE_MAX:
+            return self.send_json({"error": f"文件太大了，最大 {FILE_MAX // 1024 // 1024}MB"}, 413)
+        now = time.time()
+        with lock:
+            purge_files()
+            if files_disk_bytes() + length > FILE_TOTAL_MAX:
+                return self.send_json({"error": "服务器空间不够了，请先删掉一些旧文件"}, 507)
+            ok_cls, skipped = [], []
+            for c in classes:
+                if PUBLIC and sum(f["size"] for f in files if f["class"] == c) + length > FILE_CLASS_MAX:
+                    skipped.append(c)
+                else:
+                    ok_cls.append(c)
+            if not ok_cls:
+                return self.send_json({"error": f"所选班级的文件空间都已满 {FILE_CLASS_MAX // 1024 // 1024}MB，请先删掉一些旧文件"}, 507)
+            for k in [k for k, v in file_batches.items() if v["exp"] < now]:
+                file_batches.pop(k, None)
+            bid = secrets.token_hex(12)
+            file_batches[bid] = {"uid": self.sess()["uid"], "classes": ok_cls, "skipped": skipped, "name": name, "exp": now + 300}
+        self.send_json({"ok": True, "batch": bid, "count": len(ok_cls), "skipped": skipped})
+
     def api_file_upload(self, q):
-        """老师把文档发到大屏：?class=班级&name=文件名，请求体是文件本身（边收边写盘，不占内存）"""
+        """老师把文档发到大屏：?class=班级&name=文件名（支持多个 class 或 ?batch=编号），请求体是文件本身（边收边写盘，不占内存）"""
         def fail(msg, code=400):
             self.close_connection = True  # 请求体可能没读完，这条连接不能再用
             return self.send_json({"error": msg}, code)
         s = self.sess()
         if not s:
             return fail("请先登录", 401)
-        cls = (q.get("class") or [""])[0]
-        if not self.allowed(cls, "teacher"):
+        students = load_students()
+        bid = (q.get("batch") or [""])[0]
+        pre_skipped = []
+        if bid:
+            with lock:
+                b = file_batches.pop(bid, None)
+            if not b or b["exp"] < time.time() or b["uid"] != s["uid"]:
+                return fail("群发任务已过期，请重新选择文件上传", 400)
+            classes = list(dict.fromkeys(resolve_class(c) for c in b["classes"] if resolve_class(c) in students))
+            pre_skipped = list(b.get("skipped") or [])
+        else:
+            raw_cs = q.get("class") or []
+            classes = list(dict.fromkeys(resolve_class(c) for c in raw_cs if c and resolve_class(c) in students))
+        if not classes or not all(self.allowed(c, "teacher") for c in classes):
             return fail("你不是这个班的老师", 403)
+        if PUBLIC and len(classes) > 1:
+            return fail("公共服务器不支持多班群发", 403)
         name = os.path.basename((q.get("name") or [""])[0].replace("\\", "/")).strip()
         name = re.sub(r'[\x00-\x1f<>:"|?*]', "_", name)[:80]
         ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
@@ -2833,12 +2936,21 @@ class Handler(BaseHTTPRequestHandler):
             return fail(f"文件太大了，最大 {FILE_MAX // 1024 // 1024}MB", 413)
         with lock:
             purge_files()
-            if sum(f["size"] for f in files) + length > FILE_TOTAL_MAX:
+            if files_disk_bytes() + length > FILE_TOTAL_MAX:
                 return fail("服务器空间不够了，请先删掉一些旧文件", 507)
-            if PUBLIC and sum(f["size"] for f in files if f["class"] == cls) + length > FILE_CLASS_MAX:
-                return fail(f"本班文件已经满 {FILE_CLASS_MAX // 1024 // 1024}MB 了，请先删掉一些旧文件（7 天后也会自动删）", 507)
-        fid = secrets.token_hex(12)
-        tmp = os.path.join(FILE_DIR, fid + ".part")
+            ok_cls, skipped = [], list(pre_skipped)
+            for c in classes:
+                if PUBLIC and sum(f["size"] for f in files if f["class"] == c) + length > FILE_CLASS_MAX:
+                    if len(classes) == 1 and not pre_skipped:
+                        return fail(f"本班文件已经满 {FILE_CLASS_MAX // 1024 // 1024}MB 了，请先删掉一些旧文件（7 天后也会自动删）", 507)
+                    skipped.append(c)
+                else:
+                    ok_cls.append(c)
+            if not ok_cls:
+                return fail(f"所选班级的文件空间都已满 {FILE_CLASS_MAX // 1024 // 1024}MB，请先删掉一些旧文件", 507)
+        first_fid = secrets.token_hex(12)
+        tmp = os.path.join(FILE_DIR, first_fid + ".part")
+        created_paths = []
         try:
             left = length
             with open(tmp, "wb") as fh:
@@ -2848,21 +2960,43 @@ class Handler(BaseHTTPRequestHandler):
                         raise OSError("上传中断")
                     fh.write(chunk)
                     left -= len(chunk)
-            os.replace(tmp, os.path.join(FILE_DIR, fid))
+            first_path = os.path.join(FILE_DIR, first_fid)
+            os.replace(tmp, first_path)
+            created_paths.append(first_path)
+            blob_id = first_fid if len(ok_cls) > 1 else None
+            entries = [(ok_cls[0], first_fid, blob_id)]
+            for c in ok_cls[1:]:
+                fid = secrets.token_hex(12)
+                dst = os.path.join(FILE_DIR, fid)
+                try:
+                    os.link(first_path, dst)
+                    entries.append((c, fid, blob_id))
+                except OSError:
+                    shutil.copy2(first_path, dst)
+                    entries.append((c, fid, None))
+                created_paths.append(dst)
         except OSError:
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
+            for p in [tmp] + created_paths:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
             return fail("上传中断了，请重试")
+        now = time.time()
         with lock:
-            files.append({"id": fid, "class": cls, "name": name, "ext": ext, "size": length,
-                          "by": s["name"], "uid": s["uid"], "at": time.time()})
+            for c, fid, bid_tag in entries:
+                rec = {"id": fid, "class": c, "name": name, "ext": ext, "size": length,
+                       "by": s["name"], "uid": s["uid"], "at": now}
+                if bid_tag:
+                    rec["blob"] = bid_tag
+                files.append(rec)
             write_json(FILE_PATH, files)
         size = f"{length / 1024 / 1024:.1f}MB" if length >= 1024 * 1024 else f"{max(1, length // 1024)}KB"
-        ids, _ = create_messages([cls], f"发来文件：{name}", s["name"], kind="file",
-                                 data={"file": fid, "name": name, "size": size})
-        self.send_json({"ok": True, "id": fid, "msg_id": ids[0]})
+        ids, _ = create_messages([c for c, _, _ in entries], f"发来文件：{name}", s["name"], kind="file",
+                                 data_by_class={c: {"file": fid, "name": name, "size": size} for c, fid, _ in entries})
+        fids = [fid for _, fid, _ in entries]
+        self.send_json({"ok": True, "id": fids[0], "ids": fids, "msg_id": ids[0], "msg_ids": ids,
+                        "count": len(entries), "skipped": skipped})
 
     def api_file_delete(self, body, sender):
         fid = str(body.get("id") or "")
@@ -3309,9 +3443,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"ok": True})
 
     def api_recall(self, body):
+        raw = body.get("ids") if isinstance(body.get("ids"), list) else [body.get("id")]
+        ids = set(raw)
         with lock:
             for m in messages:
-                if m["id"] == body.get("id"):
+                if m["id"] in ids:
                     m["recalled"] = True
             save_messages()
         self.send_json({"ok": True})
@@ -3408,15 +3544,24 @@ class Handler(BaseHTTPRequestHandler):
 
     def api_recent(self, q=None):
         mine = set(self.my_classes())
+        qcls = ((q or {}).get("class") or [""])[0]
         now = time.time()
         with lock:
+            all_mine = [m for m in messages if m["class"] in mine]
+            top_all = list(reversed(all_mine[-40:]))
+            if qcls and qcls in mine:
+                top_cls = list(reversed([m for m in all_mine if m["class"] == qcls][-40:]))
+                seen = {m["id"] for m in top_cls}
+                active = sorted(top_cls + [m for m in top_all if m["id"] not in seen], key=lambda m: m["created"], reverse=True)
+            else:
+                active = top_all
             recent = [{"id": m["id"], "class": m["class"], "text": m["text"], "sender": m["sender"],
                        "time": datetime.fromtimestamp(m["created"], CN).strftime("%m-%d %H:%M"),
                        "deliver": datetime.fromtimestamp(m["deliver_at"], CN).strftime("%H:%M"),
                        "status": msg_status(m, now), "kind": m.get("kind", "call"), "who": m.get("who"),
                        "ack_secs": int(m["acked_at"] - (m.get("delivered_at") or m["deliver_at"])) if m.get("acked_at") else None,
                        "delivered_ago": int(now - m["delivered_at"]) if m.get("delivered_at") else None}
-                      for m in reversed([m for m in messages if m["class"] in mine][-40:])]
+                      for m in active]
         online = {c: now - last_seen.get(c, 0) < 15 for c in mine}
         st = period_status(cls=((q or {}).get("class") or [""])[0] or None)
         self.send_json({"messages": recent, "online": online, "period": st,

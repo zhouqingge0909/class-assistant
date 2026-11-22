@@ -339,6 +339,22 @@
   .thumbs button.on { border-color: var(--acc) !important; }
   .toast { position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%); background: #23324a; color: #fff;
     padding: 11px 20px; border-radius: 14px; z-index: 40; box-shadow: var(--shadow); animation: pop .18s ease; max-width: 90vw; }
+  /* ---------- 管理员群发 ---------- */
+  .bc-wrap { margin-top: 12px; }
+  .bc-box { margin-top: 10px; padding: 14px; border-radius: 16px; background: #f6fbf9; border: 1.5px solid #cdeedf; }
+  .bc-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .bc-stat { font-size: 13.5px; font-weight: 700; color: var(--acc-ink); }
+  .bc-stat small { font-weight: 500; color: var(--muted); margin-left: 6px; }
+  .bc-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+  .bc-acts .chip { padding: 4px 11px; font-size: 12.5px; }
+  .bc-filter { margin-bottom: 10px; padding: 8px 12px; font-size: 13.5px; border-radius: 12px; }
+  .bc-list { display: flex; flex-wrap: wrap; gap: 7px; max-height: 170px; overflow-y: auto; padding: 2px; }
+  .bc-list .chip { padding: 6px 12px; font-size: 13.5px; }
+  .bc-list .dot { width: 7px; height: 7px; }
+  .bc-warn { margin-top: 10px; padding: 8px 12px; border-radius: 11px; background: #fff6e5; color: #8a5a00; font-size: 12.5px; line-height: 1.55; }
+  .bc-preview { margin-top: 12px; padding: 12px 14px; border-radius: 14px; background: var(--soft); font-size: 14.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .bc-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; max-height: 120px; overflow-y: auto; }
+  .bc-tags .tag { background: var(--acc-soft); color: var(--acc-ink); font-weight: 600; padding: 3px 10px; }
 </style>
 </head>
 <body data-view="call">
@@ -433,11 +449,13 @@
             <label class="switch"><input type="checkbox" id="optUrgent"><span class="track"></span>紧急（上课也弹大窗）</label>
             <span class="row" style="gap:8px"><label class="switch"><input type="checkbox" id="optAt"><span class="track"></span>定时发送</label>
               <input class="input hidden" id="optAtTime" type="time" style="width:auto;padding:5px 10px;font-size:16px"></span>
+            <label class="switch hidden" id="bcCallToggleWrap"><input type="checkbox" id="bcCallOn"><span class="track"></span>群发多个班</label>
           </div>
           <div class="hidden" id="atRepeat" style="margin-top:10px">
             <div class="label" style="margin-bottom:6px"><svg class="i sm"><use href="#i-repeat"/></svg>重复（都不选就只发这一次） <button class="btn ghost sm" id="remWork">工作日</button><button class="btn ghost sm" id="remAll">每天</button></div>
             <div class="days" id="remDays"></div>
           </div>
+          <div class="hidden" id="bcCallBox"></div>
           <div class="hidden" id="qTip" style="margin-top:12px;background:#fff6e5;color:#8a5a00;border-radius:12px;padding:10px 14px;font-size:14.5px;line-height:1.65"></div>
           <div class="qres" id="qRes"><span class="k">例子：小明加2分作业优秀 · 抽一个人回答 · 每天17:10提醒值日生打扫教室</span></div>
           <div class="chips" id="qPhrases" style="margin-top:12px"></div>
@@ -577,6 +595,10 @@
             <div class="sec"><div class="label">留言内容</div><textarea class="input" id="ntText" maxlength="120" placeholder="如：周五交实验报告，没交的找课代表登记"></textarea></div>
             <div class="sec"><div class="label">署名科目（可不选）</div><div class="chips" id="ntSubjects"></div></div>
             <div class="sec"><div class="label"><svg class="i sm"><use href="#i-cal"/></svg>显示到</div><div class="chips" id="ntKeep"></div></div>
+            <div class="bc-wrap hidden" id="bcNoteWrap">
+              <label class="switch"><input type="checkbox" id="bcNoteOn"><span class="track"></span>同时发布到多个班</label>
+              <div class="hidden" id="bcNoteBox"></div>
+            </div>
             <button class="btn primary big" id="ntAdd" style="margin-top:16px"><svg class="i"><use href="#i-check"/></svg>发布到大屏</button>
             <div class="row hidden" id="ntEditBar" style="margin-top:10px;gap:8px;align-items:center;flex-wrap:wrap"><span class="me">正在修改，大屏一分钟内更新</span><button class="btn ghost sm" id="ntCancel">不改了</button><button class="btn ghost sm" id="ntDel" style="color:#ef5a5a">删除这条</button></div>
           </div>
@@ -675,7 +697,11 @@
         </div>
           <div class="card" id="fileCard" style="margin-top:20px">
             <div class="ctitle"><div class="ib"><svg class="i"><use href="#i-file"/></svg></div><div><h2>发文件到大屏</h2><div class="sub">Word、PDF、PPT、Excel、网页、图片、视频，大屏上点"打开"就能放</div></div></div>
-            <label class="drop" id="fileDrop"><div id="fileInner"><svg class="i lg" style="width:36px;height:36px"><use href="#i-file"/></svg><div style="margin-top:6px">点这里选文件</div><div class="me" style="justify-content:center">电脑上也可以把文件拖到这里</div></div>
+            <div class="bc-wrap hidden" id="bcFileWrap" style="margin:0 0 14px">
+              <label class="switch"><input type="checkbox" id="bcFileOn"><span class="track"></span>同时发到多个班</label>
+              <div class="hidden" id="bcFileBox"></div>
+            </div>
+            <label class="drop" id="fileDrop"><div id="fileInner"><svg class="i lg" style="width:36px;height:36px"><use href="#i-file"/></svg><div style="margin-top:6px">点这里选文件</div><div class="me" id="fileDropHint" style="justify-content:center">电脑上也可以把文件拖到这里</div></div>
               <input type="file" id="fileInput"></label>
             <div id="fileProg" class="hidden" style="margin-top:12px"><div style="height:10px;border-radius:99px;background:var(--soft);overflow:hidden"><div id="fileBar" style="height:100%;width:0;background:var(--acc,#16a571);transition:width .2s"></div></div><div class="me" id="fileProgTxt" style="margin-top:6px"></div></div>
             <div class="me" style="white-space:normal;margin-top:10px;line-height:1.7">最大 50MB，保留 7 天。一体机下载好后存在桌面「班级文件」里。网页要是单个 .html 文件，用浏览器打开。<br>📱 苹果手机发微信里的文件：先在微信里打开文件 → ··· →「用其他应用打开」→「存储到文件」，再回来选。</div>
@@ -931,6 +957,14 @@
   </div>
 </div>
 
+<div class="mask hidden" id="bcConfirmMask">
+  <div class="dialog" style="max-width:500px">
+    <h3 id="bcConfirmTitle"><svg class="i"><use href="#i-send"/></svg>确认群发</h3>
+    <div id="bcConfirmBody"></div>
+    <div class="btns"><button class="btn" id="bcConfirmNo">取消</button><button class="btn primary" id="bcConfirmYes">确认群发</button></div>
+  </div>
+</div>
+
 <script>
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -1053,9 +1087,168 @@ const PUSH_PATHS = ['/api/board/show', '/api/send', '/api/homework/push', '/api/
   '/api/attend/start', '/api/duty/push', '/api/collect/remind'];
 function offlineOk(path, body) {  // 大屏没连上时先问一下老师
   if (!body || !(PUSH_PATHS.includes(path) || (path === '/api/homework/add' && body.push) || (path === '/api/points/add' && body.delta > 0 && body.praise))) return true;
+  if (Array.isArray(body.classes) && body.classes.length > 1) return true;  // 群发已在确认弹窗里提示离线数量
   const off = (body.classes || [body.class]).filter(c => S.online && S.online[c] === false);
   if (!off.length) return true;
-  return confirm(`${off.join('、')}的大屏现在没有连接（一体机可能关机或断网），学生暂时看不到。\n\n仍然发送吗？大屏 2 小时内连上会自动显示。`);
+  const who = off.length > 5 ? `${off.slice(0, 5).join('、')} 等 ${off.length} 个班` : off.join('、');
+  return confirm(`${who}的大屏现在没有连接（一体机可能关机或断网），学生暂时看不到。\n\n仍然发送吗？大屏 2 小时内连上会自动显示。`);
+}
+
+// ---------- 管理员群发（喊话 / 定时提醒 / 大屏留言 / 发文件） ----------
+const BC_SCOPES = ['call', 'note', 'file'];
+const BC_EL = {
+  call: { wrap: '#bcCallToggleWrap', cb: '#bcCallOn', box: '#bcCallBox' },
+  note: { wrap: '#bcNoteWrap', cb: '#bcNoteOn', box: '#bcNoteBox' },
+  file: { wrap: '#bcFileWrap', cb: '#bcFileOn', box: '#bcFileBox' },
+};
+S.bc = {
+  call: { on: false, set: new Set(), filter: '' },
+  note: { on: false, set: new Set(), filter: '' },
+  file: { on: false, set: new Set(), filter: '' },
+};
+const canBroadcast = () => !!(D.admin && !D.public && D.classes && D.classes.length > 1);
+const bcClassNames = () => (D.classes || []).map(c => c.name);
+function bcGradeGroups(names) {
+  const map = new Map();
+  names.forEach(n => {
+    const m = n.match(/^(高[一二三123]|初[一二三123]|[一二三四五六七八九]年级|小[一二三四五六]|\d{2,4}级)/);
+    if (m) (map.get(m[1]) || map.set(m[1], []).get(m[1])).push(n);
+  });
+  return [...map.entries()].filter(([, list]) => list.length >= 2);
+}
+function bcTargets(scope) {
+  const st = S.bc[scope];
+  if (!canBroadcast() || !st.on) return S.cls ? [S.cls] : [];
+  const all = bcClassNames();
+  return all.filter(c => st.set.has(c));
+}
+function bcSetOn(scope, on, preset) {
+  const st = S.bc[scope];
+  st.on = !!(on && canBroadcast());
+  if (st.on) {
+    if (preset) st.set = new Set(preset);
+    else if (!st.set.size && S.cls) st.set = new Set([S.cls]);
+  } else {
+    st.filter = '';
+  }
+  const el = BC_EL[scope];
+  if ($(el.cb)) $(el.cb).checked = st.on;
+  renderBc(scope);
+}
+function bcSyncVisibility() {
+  const ok = canBroadcast();
+  BC_SCOPES.forEach(sc => {
+    const el = BC_EL[sc];
+    const hide = !ok || (sc === 'note' && !!S.ntEdit);
+    if ($(el.wrap)) $(el.wrap).classList.toggle('hidden', hide);
+    if (!ok) { S.bc[sc].on = false; if ($(el.cb)) $(el.cb).checked = false; }
+    renderBc(sc);
+  });
+}
+function bcSyncActionUI(scope) {
+  const st = S.bc[scope], targets = bcTargets(scope);
+  if (scope === 'call') {
+    if (typeof renderTip === 'function') renderTip();
+    if (typeof quickParse === 'function') quickParse();
+    if (typeof updatePreview === 'function') updatePreview();
+  } else if (scope === 'note' && !S.ntEdit) {
+    const btn = $('#ntAdd');
+    if (btn) {
+      btn.disabled = st.on && !targets.length;
+      btn.lastChild.textContent = st.on && targets.length > 1 ? `发布留言到 ${targets.length} 个班` : '发布到大屏';
+    }
+  } else if (scope === 'file') {
+    const hint = $('#fileDropHint');
+    if (hint) {
+      hint.textContent = !st.on ? '电脑上也可以把文件拖到这里'
+        : !targets.length ? '请先在上方勾选要发送的班级'
+        : targets.length > 1 ? `选好文件后会确认并群发到已选的 ${targets.length} 个班`
+        : `将发送到 ${targets[0]}（也可以把文件拖到这里）`;
+    }
+  }
+}
+function renderBcListOnly(scope) {
+  const st = S.bc[scope], box = $(BC_EL[scope].box);
+  const listEl = box && box.querySelector('.bc-list');
+  if (!listEl) return renderBc(scope);
+  const all = bcClassNames(), q = (st.filter || '').trim().toLowerCase();
+  const shown = q ? all.filter(c => c.toLowerCase().includes(q)) : all;
+  listEl.innerHTML = shown.map(c => `<button type="button" class="chip ${st.set.has(c) ? 'on' : ''}" data-bccls="${scope}" data-cls="${esc(c)}"><span class="dot ${S.online && S.online[c] ? 'on' : ''}"></span>${esc(c)}</button>`).join('') || '<span class="me">没有匹配的班级</span>';
+}
+function renderBc(scope) {
+  const st = S.bc[scope], el = BC_EL[scope], box = $(el.box);
+  if (!box) return;
+  const hide = !canBroadcast() || !st.on || (scope === 'note' && !!S.ntEdit);
+  box.classList.toggle('hidden', hide);
+  if (!hide) {
+    const prevScroll = box.querySelector('.bc-list')?.scrollTop || 0;
+    const all = bcClassNames(), valid = new Set(all);
+    st.set = new Set([...st.set].filter(c => valid.has(c)));
+    const sel = all.filter(c => st.set.has(c));
+    const onCount = sel.filter(c => S.online && S.online[c]).length;
+    const allOn = all.length > 0 && sel.length === all.length;
+    const groups = bcGradeGroups(all);
+    const q = (st.filter || '').trim().toLowerCase();
+    const shown = q ? all.filter(c => c.toLowerCase().includes(q)) : all;
+    const grpBtns = groups.map(([g, list]) => {
+      const full = list.every(c => st.set.has(c));
+      return `<button type="button" class="chip ${full ? 'on' : ''}" data-bcgrp="${scope}" data-bcg="${esc(g)}">${esc(g)} (${list.length})</button>`;
+    }).join('');
+    box.innerHTML = `<div class="bc-box">
+      <div class="bc-head">
+        <div class="bc-stat">已选 ${sel.length} / ${all.length} 个班<small>${sel.length ? `在线 ${onCount} 个` : '请至少选一个班'}</small></div>
+        <div class="bc-acts">
+          <button type="button" class="chip ${allOn ? 'on' : ''}" data-bcall="${scope}">${allOn ? '取消全选' : `全选 (${all.length})`}</button>
+          ${grpBtns}
+          <button type="button" class="chip" data-bccur="${scope}">仅本班</button>
+          <button type="button" class="chip" data-bcclear="${scope}">清空</button>
+        </div>
+      </div>
+      ${all.length >= 12 ? `<input class="input bc-filter" data-bcfilter="${scope}" value="${esc(st.filter)}" placeholder="输入关键词筛选班级，如：高三、3班…">` : ''}
+      <div class="bc-list">${shown.map(c => `<button type="button" class="chip ${st.set.has(c) ? 'on' : ''}" data-bccls="${scope}" data-cls="${esc(c)}"><span class="dot ${S.online && S.online[c] ? 'on' : ''}"></span>${esc(c)}</button>`).join('') || '<span class="me">没有匹配的班级</span>'}</div>
+      ${D.public ? '<div class="bc-warn">公共服务器提示：这里包含不同学校老师建的班级，群发前请仔细核对已选班级。</div>' : ''}
+    </div>`;
+    const nextList = box.querySelector('.bc-list');
+    if (nextList) nextList.scrollTop = prevScroll;
+  }
+  bcSyncActionUI(scope);
+}
+function bcUpdateDots() {
+  BC_SCOPES.forEach(sc => {
+    const box = $(BC_EL[sc].box);
+    if (!box || box.classList.contains('hidden')) return;
+    box.querySelectorAll('[data-bccls]').forEach(b => {
+      const d = b.querySelector('.dot');
+      if (d) d.classList.toggle('on', !!(S.online && S.online[b.dataset.cls]));
+    });
+    const sel = bcTargets(sc), onCount = sel.filter(c => S.online && S.online[c]).length;
+    const sm = box.querySelector('.bc-stat small');
+    if (sm) sm.textContent = sel.length ? `在线 ${onCount} 个` : '请至少选一个班';
+  });
+}
+let bcConfirmResolve = null;
+function closeBcConfirm(ok) {
+  $('#bcConfirmMask').classList.add('hidden');
+  if (bcConfirmResolve) { const fn = bcConfirmResolve; bcConfirmResolve = null; fn(!!ok); }
+}
+function confirmBroadcast({ title = '确认群发', targets, body, badges = [], note = '', danger = false }) {
+  const on = targets.filter(c => S.online && S.online[c]).length, off = targets.length - on;
+  const show = targets.slice(0, 15), more = targets.length - show.length;
+  $('#bcConfirmTitle').innerHTML = ic('send') + esc(title);
+  $('#bcConfirmBody').innerHTML = `
+    ${D.public ? '<div class="bc-warn" style="margin:0 0 12px;font-weight:700">公共服务器提醒：以下内容将发送到不同学校的班级大屏，请务必核对目标班级！</div>' : ''}
+    <div style="font-size:15.5px;font-weight:700">发往 <span style="color:var(--acc-ink)">${targets.length}</span> 个班
+      <span class="me" style="font-weight:500;margin-left:6px">${on} 个大屏在线${off ? `，${off} 个未连接` : ''}</span></div>
+    <div class="bc-tags">${show.map(c => `<span class="tag">${esc(c)}</span>`).join('')}${more ? `<span class="tag" style="background:var(--soft);color:var(--muted)">等共 ${targets.length} 个班</span>` : ''}</div>
+    ${badges.length ? `<div class="chips" style="margin-top:10px">${badges.map(b => `<span class="tag" style="background:${b.warn ? '#ffeded' : '#e6f3ff'};color:${b.warn ? '#ef5a5a' : '#1f6fc0'}">${esc(b.text)}</span>`).join('')}</div>` : ''}
+    <div class="bc-preview">${esc(body)}</div>
+    ${note ? `<p class="me" style="white-space:normal;margin:10px 0 0">${esc(note)}</p>` : ''}
+    ${off ? `<p class="me" style="white-space:normal;margin:8px 0 0;color:#8a5a00">提示：有 ${off} 个班的大屏当前未连接，2 小时内连上会自动显示。</p>` : ''}`;
+  const yes = $('#bcConfirmYes');
+  yes.textContent = `确认发给 ${targets.length} 个班`;
+  yes.className = 'btn ' + (danger || D.public ? 'danger' : 'primary');
+  $('#bcConfirmMask').classList.remove('hidden');
+  return new Promise(res => { bcConfirmResolve = res; });
 }
 async function copyText(txt, what = '链接') {  // http 页面没有 clipboard API，退回到老办法
   try { await navigator.clipboard.writeText(txt); return toast(what + '已复制 ✓'); } catch {}
@@ -1112,7 +1305,7 @@ async function start() {
   const sv = store.get('cc_voice');
   $('#voiceSel').value = D.voices.some(v => v.id === sv) ? sv : D.default_voice;
   if (D.public) $('#notice').maxLength = 200;
-  renderNav(); renderStatic(); go(S.view); refresh();
+  renderNav(); renderStatic(); bcSyncVisibility(); go(S.view); refresh();
 }
 
 function renderNav() {
@@ -1173,7 +1366,7 @@ function syncChips() {
 }
 
 // ---------- 喊话 ----------
-function renderCall() { loadPhrases(); updatePreview(); renderRecent(); loadReminders(); }
+function renderCall() { loadPhrases(); renderBc('call'); updatePreview(); renderRecent(); loadReminders(); }
 function buildText() {
   return $('#notice').value.trim();
 }
@@ -1183,12 +1376,13 @@ function modeText() {
   return `${v} · ${extra}`;
 }
 function updatePreview() {
-  const t = buildText();
+  const t = buildText(), targets = bcTargets('call');
   $('#pvHead').textContent = `${me} · ${atTime() ? '今天 ' + atTime() : '现在'}`;
   $('#preview').textContent = t || '请输入消息内容';
   $('#preview').classList.toggle('empty', !t);
-  $('#pvMode').textContent = modeText();
-  $('#sendBtn').disabled = !t || !S.cls;
+  $('#pvMode').textContent = (S.bc.call.on && targets.length > 1 ? `群发给 ${targets.length} 个班 · ` : '') + modeText();
+  $('#sendBtn').disabled = !t || !targets.length;
+  $('#sendBtn').lastChild.textContent = S.bc.call.on && targets.length > 1 ? `群发给 ${targets.length} 个班` : '发送';
 }
 async function loadPhrases() { try { renderPhrases((await api('/api/phrases')).items); } catch {} }
 function renderPhrases(items) {
@@ -1199,9 +1393,12 @@ function renderPhrases(items) {
 // 发送前的说明：上课、晚自习、考试时这条会怎么显示（不弹确认框，发错了靠撤回）
 function renderTip() {
   const p = S.period, urgent = $('#optUrgent').checked, speak = $('#optSpeak').checked, tip = $('#qTip');
+  const bc = S.bc.call.on, targets = bcTargets('call');
   let h = '';
-  if (atTime() && S.remDays.length) h = `<b>${DAYS_TXT(S.remDays)} ${atTime()} 自动发到大屏</b>，保存后在下面「定时提醒」里能改、能暂停。可以写 {值日}，发的时候换成当天值日生。`;
-  else if (atTime()) h = `<b>定时：今天 ${atTime()} 发送</b>，发出前可以在「记录」里撤回。到时候正在上课的话，只在右下角小字显示，要弹大窗就打开「紧急」。`;
+  if (bc && !targets.length) h = '<b>还没有选择群发班级</b>：请在上面点选要发送的班级。';
+  else if (atTime() && S.remDays.length) h = `<b>${DAYS_TXT(S.remDays)} ${atTime()} 自动发到${bc && targets.length > 1 ? ` ${targets.length} 个班的` : ''}大屏</b>，保存后在下面「定时提醒」里能改、能暂停。可以写 {值日}，发的时候换成当天值日生。`;
+  else if (atTime()) h = `<b>定时：今天 ${atTime()} ${bc && targets.length > 1 ? `群发给 ${targets.length} 个班` : '发送'}</b>，发出前可以在「记录」里撤回。到时候正在上课的话，只在右下角小字显示，要弹大窗就打开「紧急」。`;
+  else if (bc && targets.length > 1) h = `<b>群发模式：将发往 ${targets.length} 个班</b>（发送前会弹出确认，发出后 5 秒内可一键全部撤回）。各班按各自作息与考试状态显示${urgent ? '，已开「紧急」上课也弹大窗' : ''}。`;
   else if (S.exam && !urgent) h = `<b>这个班正在考试</b>（${esc(S.exam.subject)} ${esc(S.exam.start)}–${esc(S.exam.end)}）：普通消息考完再显示。急事请打开「紧急」。`;
   else if (p && p.in_class) {
     const when = `现在是${p.evening ? '晚自习' : '上课'}时间（${p.evening ? '' : `第${p.period}节，`}${esc(p.end)} 下课）`;
@@ -1238,22 +1435,41 @@ function showUndo(ids, text) {
   undoTimer = setInterval(() => { n--; if (n <= 0) end(); else bar.querySelector('button span').textContent = n; }, 1000);
   bar.querySelector('button').onclick = async () => {
     end();
-    try { for (const id of ids) await api('/api/recall', { id }); toast('已撤回'); refresh(); } catch (e) { toast('撤回失败：' + e.message); }
+    try {
+      if (ids.length > 1) { await api('/api/recall', { ids }); toast(`已全部撤回（${ids.length} 条）`); }
+      else if (ids.length === 1) { await api('/api/recall', { id: ids[0] }); toast('已撤回'); }
+      refresh();
+    } catch (e) { toast('撤回失败：' + e.message); }
   };
 }
 async function send() {
-  const text = buildText(); if (!text || !S.cls || S.sending) return;  // 合成语音要几秒，期间再按回车不重复发
-  const speak = $('#optSpeak').checked, btn = $('#qSend'), label = btn.innerHTML;
-  S.sending = true; btn.disabled = true; btn.textContent = '发送中…';
+  const text = buildText(), targets = bcTargets('call');
+  if (!text || !targets.length || S.sending) return;  // 合成语音要几秒，期间再按回车不重复发
+  const speak = $('#optSpeak').checked, urgent = $('#optUrgent').checked, at = atTime();
+  if (targets.length > 1) {
+    const badges = [{ text: speak ? '语音播报' : '静音显示' }];
+    if (urgent) badges.push({ text: '紧急：上课也弹大窗', warn: true });
+    if (at) badges.push({ text: `定时：今天 ${at}` });
+    const ok = await confirmBroadcast({
+      title: at ? '确认定时群发' : '确认群发消息', targets, body: text, badges,
+      note: '发出后 5 秒内可以一键全部撤回。', danger: urgent
+    });
+    if (!ok) return;
+  }
+  const btn = $('#qSend'), label = btn.innerHTML;
+  S.sending = true; btn.disabled = true; $('#sendBtn').disabled = true; btn.textContent = '发送中…';
   try {
-    const r = await api('/api/send', { classes: [S.cls], text, who: S.who || '', voice: speak,
-      loud: speak && !!(atTime() || S.period && S.period.in_class), urgent: $('#optUrgent').checked, defer: $('#optDefer').checked, at: atTime(), ...voiceOpts() });
-    showUndo(r.ids || [], r.exam ? '那时正在考试，考完后在大屏显示' : atTime() ? `已定时，今天 ${atTime()} 发到${S.cls}大屏` : r.scheduled ? '已安排，下课后自动发送' : `已发送到${S.cls}大屏`);
+    const r = await api('/api/send', { classes: targets, text, who: targets.length > 1 ? '' : (S.who || ''), voice: speak,
+      loud: speak && !!(at || S.period && S.period.in_class), urgent, defer: $('#optDefer').checked, at, ...voiceOpts() });
+    const msg = targets.length > 1
+      ? (r.exam ? `已群发给 ${targets.length} 个班（考试中的班考完后显示）` : at ? `已定时，今天 ${at} 群发给 ${targets.length} 个班` : `已群发给 ${targets.length} 个班`)
+      : (r.exam ? '那时正在考试，考完后在大屏显示' : at ? `已定时，今天 ${at} 发到${targets[0]}大屏` : r.scheduled ? '已安排，下课后自动发送' : `已发送到${targets[0]}大屏`);
+    showUndo(r.ids || [], msg);
     $('#notice').value = '';
     $('#qText').value = ''; $('#qSend').disabled = true; S.timing = ''; S.who = ''; $('#qRes').innerHTML = Q_HINT;
-    $('#optUrgent').checked = false; setAt(false); speakDefault(); refresh();
+    $('#optUrgent').checked = false; setAt(false); bcSetOn('call', false); speakDefault(); refresh();
   } catch (e) { toast('发送失败：' + e.message); }
-  S.sending = false; btn.innerHTML = label; btn.disabled = !$('#qText').value.trim();
+  S.sending = false; btn.innerHTML = label; quickParse(); updatePreview();
 }
 
 
@@ -1385,17 +1601,22 @@ S.intent = null;
 function quickParse() {
   if (atTime()) return quickParseTimed();
   const raw0 = $('#qText').value.trim();
-  const c0 = cls();
-  S.intent = raw0 && c0 ? parseIntent(raw0, { names: c0.students.map(s => s.name), subjects: subjOf(), subject: S.subject }) : null;
+  const c0 = cls(), bc = S.bc.call.on, targets = bcTargets('call');
+  const parsed = raw0 && c0 ? parseIntent(raw0, { names: c0.students.map(s => s.name), subjects: subjOf(), subject: S.subject }) : null;
+  // 群发模式不触发单班动作（布置作业/计时/抽号/加分），只保留定时提醒与普通通知
+  S.intent = bc && parsed && parsed.type !== 'remind' ? null : parsed;
   const it = S.intent, chip = (k, v, warn) => `<span class="k">${k}</span><span class="v ${warn ? 'warn' : ''}">${esc(v)}</span>`;
   const label = { homework: '布置作业', timer: '开始计时', pick: '抽一位', remind: '保存提醒', points: it && it.delta < 0 ? '扣分' : '加分' };
-  $('#qSend').lastChild.textContent = it && label[it.type] ? label[it.type] : '发送';
+  const btnTxt = bc && !targets.length ? '请选班级'
+    : it && label[it.type] ? (bc && targets.length > 1 && it.type === 'remind' ? `保存提醒 (${targets.length}班)` : label[it.type])
+    : bc && targets.length > 1 ? `群发 (${targets.length}班)` : '发送';
+  $('#qSend').lastChild.textContent = btnTxt;
   if (it && label[it.type]) {
-    $('#qSend').disabled = false;
+    $('#qSend').disabled = bc && !targets.length;
     $('#qRes').innerHTML = it.type === 'homework' ? chip('布置作业', it.subject) + chip('内容', it.content) + (it.minutes ? chip('用时', it.minutes + ' 分钟') : '') + (it.due ? chip('交', it.due) : '') + '<span class="k">· 会同时推送到大屏</span>'
       : it.type === 'timer' ? chip('计时', it.seconds >= 60 ? `${Math.floor(it.seconds / 60)} 分钟${it.seconds % 60 ? ` ${it.seconds % 60} 秒` : ''}` : it.seconds + ' 秒') + (it.label ? chip('标题', it.label) : '') + '<span class="k">· 大屏全屏倒计时</span>'
       : it.type === 'pick' ? chip('随机抽号', S.cls) + '<span class="k">· 大屏滚动名单</span>'
-      : it.type === 'remind' ? chip('定时提醒', `${DAYS_TXT(it.days)} ${it.time}`) + chip('内容', it.text)
+      : it.type === 'remind' ? chip('定时提醒', `${DAYS_TXT(it.days)} ${it.time}`) + chip('内容', it.text) + (bc && targets.length > 1 ? chip('群发', `${targets.length} 个班`) : '')
       : chip(it.delta > 0 ? '加分' : '扣分', `${it.names.join('、')} ${it.delta > 0 ? '+' : ''}${it.delta}`) + (it.reason ? chip('理由', it.reason) : '') + (it.delta > 0 ? '<span class="k">· 大屏表扬</span>' : '<span class="k">· 不上大屏</span>');
     return;
   }
@@ -1409,41 +1630,68 @@ async function runIntent() {
     else if (it.type === 'timer') { const r = await api('/api/tools/timer', { class: S.cls, seconds: it.seconds, label: it.label });
       S.timer = { id: r.id, end_at: r.end_at, label: it.label, cls: S.cls }; store.set('cc_timer', JSON.stringify(S.timer)); done('大屏开始计时，可在"课堂"里停止'); }
     else if (it.type === 'pick') { const r = await api('/api/tools/pick', { class: S.cls, voice: true, ...voiceOpts() }); S.picks.unshift(r.name); done(`抽到：${r.name}`); }
-    else if (it.type === 'remind') { await api('/api/reminders/save', { classes: [S.cls], time: it.time, days: it.days, text: it.text, voice: true, ...voiceOpts() }); done(`已设置：${DAYS_TXT(it.days)} ${it.time} 提醒`); loadReminders(); }
+    else if (it.type === 'remind') {
+      const targets = bcTargets('call'); if (!targets.length) return toast('请至少选择一个班级');
+      if (targets.length > 1) {
+        const ok = await confirmBroadcast({ title: '确认群发定时提醒', targets, body: it.text,
+          badges: [{ text: `${DAYS_TXT(it.days)} ${it.time}` }, { text: '语音播报' }],
+          note: '保存后将按设定时间自动发送到上述班级大屏。' });
+        if (!ok) return;
+      }
+      await api('/api/reminders/save', { classes: targets, time: it.time, days: it.days, text: it.text, voice: true, ...voiceOpts() });
+      bcSetOn('call', false);
+      done(targets.length > 1 ? `已设置群发提醒（${targets.length} 个班）：${DAYS_TXT(it.days)} ${it.time}` : `已设置：${DAYS_TXT(it.days)} ${it.time} 提醒`);
+      loadReminders();
+    }
     else if (it.type === 'points') { await api('/api/points/add', { class: S.cls, names: it.names, delta: it.delta, reason: it.reason, praise: it.delta > 0, ...voiceOpts() });
       done(`${it.names.join('、')} ${it.delta > 0 ? '+' : ''}${it.delta} 分 ✓` + (it.delta > 0 ? '，已在大屏表扬' : '')); }
   } catch (e) { toast(e.message); }
 }
 function quickParseCall() {
-  const raw = $('#qText').value.trim();
-  $('#qSend').disabled = !raw;
-  if (!raw) { $('#qRes').innerHTML = Q_HINT; return; }
+  const raw = $('#qText').value.trim(), bc = S.bc.call.on, targets = bcTargets('call');
+  $('#qSend').disabled = !raw || (bc && !targets.length);
+  if (!raw) { $('#qRes').innerHTML = bc && targets.length > 1 ? `<span class="k">群发目标</span><span class="v">${targets.length} 个班</span><span class="k">· 请输入要群发的内容</span>` : Q_HINT; return; }
   const c = cls(); if (!c) return;
-  const r = parseUtter(raw, c.students.map(s => s.name), D.places, subjOf(), S.place || D.places[0]);
+  const r = bc ? { students: [] } : parseUtter(raw, c.students.map(s => s.name), D.places, subjOf(), S.place || D.places[0]);
   // 老师打的字原样发，不改写；认出的学生只用来提示和记录"喊的是谁"
   setMode('notice');
   $('#notice').value = raw;
   S.who = r.students.join('、');
   updatePreview();
-  $('#qRes').innerHTML = '';
+  $('#qRes').innerHTML = bc && targets.length > 1 ? `<span class="k">群发目标</span><span class="v">${targets.length} 个班</span><span class="k">· 发送前会弹出确认</span>` : '';
 }
 function setMode(m) { S.mode = m; }
 function quickParseTimed() {
-  const raw = $('#qText').value.trim(), rep = S.remDays.length;
+  const raw = $('#qText').value.trim(), rep = S.remDays.length, bc = S.bc.call.on, targets = bcTargets('call');
   S.intent = null; setMode('notice'); $('#notice').value = raw; S.who = ''; updatePreview();
-  $('#qSend').lastChild.textContent = S.remEdit ? '保存修改' : rep ? '保存提醒' : '定时发送';
-  $('#qSend').disabled = !raw;
+  $('#qSend').lastChild.textContent = bc && !targets.length ? '请选班级'
+    : S.remEdit ? (bc && targets.length > 1 ? `保存 (${targets.length}班)` : '保存修改')
+    : rep ? (bc && targets.length > 1 ? `保存提醒 (${targets.length}班)` : '保存提醒')
+    : (bc && targets.length > 1 ? `定时群发 (${targets.length}班)` : '定时发送');
+  $('#qSend').disabled = !raw || (bc && !targets.length);
   $('#qRes').innerHTML = (S.remEdit ? '<span class="k">正在修改定时提醒</span><button class="btn ghost sm" id="remCancel">不改了</button><button class="btn ghost sm" id="remDel" style="color:#ef5a5a">删除这条</button>' : '')
-    + (raw ? `<span class="k">${rep ? esc(DAYS_TXT(S.remDays)) : '今天'} ${esc(atTime())}</span><span class="v">${esc(raw)}</span>` : '');
+    + (raw ? `<span class="k">${rep ? esc(DAYS_TXT(S.remDays)) : '今天'} ${esc(atTime())}</span><span class="v">${esc(raw)}</span>` : '')
+    + (bc && targets.length > 1 ? `<span class="k">群发</span><span class="v">${targets.length} 个班</span>` : '');
 }
 async function saveTimed() {  // 定时 + 重复：存成定时提醒
-  const text = $('#qText').value.trim(); if (!text || S.sending) return;
+  const text = $('#qText').value.trim(), targets = bcTargets('call');
+  if (!text || !targets.length || S.sending) return;
+  const speak = $('#optSpeak').checked, urgent = $('#optUrgent').checked;
+  if (targets.length > 1) {
+    const badges = [{ text: `${DAYS_TXT(S.remDays)} ${atTime()}` }, { text: speak ? '语音播报' : '静音显示' }];
+    if (urgent) badges.push({ text: '紧急：上课也弹大窗', warn: true });
+    const ok = await confirmBroadcast({
+      title: S.remEdit ? '确认修改群发定时提醒' : '确认群发定时提醒', targets, body: text, badges,
+      note: '保存后将按设定时间自动发送到上述班级大屏。', danger: urgent
+    });
+    if (!ok) return;
+  }
   S.sending = true;
   try {
-    await api('/api/reminders/save', { id: S.remEdit, classes: [S.cls], time: atTime(), days: S.remDays, text,
-      voice: $('#optSpeak').checked, urgent: $('#optUrgent').checked, ...voiceOpts() });
-    toast(`已设置：${DAYS_TXT(S.remDays)} ${atTime()} ✓`);
-    $('#qText').value = ''; $('#optUrgent').checked = false; setAt(false); speakDefault(); loadReminders();
+    await api('/api/reminders/save', { id: S.remEdit, classes: targets, time: atTime(), days: S.remDays, text,
+      voice: speak, urgent, ...voiceOpts() });
+    toast(targets.length > 1 ? `已设置群发提醒（${targets.length} 个班）：${DAYS_TXT(S.remDays)} ${atTime()} ✓` : `已设置：${DAYS_TXT(S.remDays)} ${atTime()} ✓`);
+    $('#qText').value = ''; $('#optUrgent').checked = false; setAt(false); bcSetOn('call', false); speakDefault(); loadReminders();
   } catch (e) { toast(e.message); }
   S.sending = false;
 }
@@ -1484,6 +1732,7 @@ function dayLabel(d, today) {  // 2026-10-14 → 明天 / 昨天 / 10月16日（
 S.ntSubject = ''; S.ntKeep = 'week';
 const NT_KEEP = [['today', '今天'], ['week', '到本周日'], ['forever', '一直显示']];
 async function loadNotes() {
+  renderBc('note');
   let r; try { r = await api('/api/notes?class=' + encodeURIComponent(S.cls)); } catch { return; }
   if (S.ntSubject && !subjOf().includes(S.ntSubject)) S.ntSubject = '';
   $('#ntSubjects').innerHTML = [['', '不写科目'], ...subjOf().map(x => [x, x])].map(([v, t]) => `<button class="chip ${v === S.ntSubject ? 'on' : ''}" data-ntsubj="${esc(v)}">${esc(t)}</button>`).join('');
@@ -1501,7 +1750,26 @@ async function addNote() {
   if (!text) return toast('请填写留言内容');
   try {
     if (S.ntEdit) { await api('/api/notes/edit', { id: S.ntEdit, text, subject: S.ntSubject, keep: S.ntKeep }); toast('已修改，大屏一分钟内更新 ✓'); editNote(null); }
-    else { await api('/api/notes/add', { class: S.cls, text, subject: S.ntSubject, keep: S.ntKeep }); toast('已发布，大屏一分钟内显示 ✓'); $('#ntText').value = ''; }
+    else {
+      const targets = bcTargets('note');
+      if (!targets.length) return toast('请至少选择一个班级');
+      if (targets.length > 1) {
+        const keepTxt = (NT_KEEP.find(x => x[0] === S.ntKeep) || [])[1] || '';
+        const badges = [...(S.ntSubject ? [{ text: `署名：${S.ntSubject}` }] : []), { text: `显示：${keepTxt}` }];
+        const ok = await confirmBroadcast({
+          title: '确认群发大屏留言', targets, body: text, badges,
+          note: '会挂在各班大屏看板上，已有 8 条留言的班会自动跳过。'
+        });
+        if (!ok) return;
+        const r = await api('/api/notes/add', { classes: targets, text, subject: S.ntSubject, keep: S.ntKeep });
+        const skip = r.skipped && r.skipped.length ? `（${r.skipped.length} 个班已满 8 条已跳过）` : '';
+        toast(`已发布留言到 ${r.count} 个班 ✓${skip}`);
+        $('#ntText').value = ''; bcSetOn('note', false);
+      } else {
+        await api('/api/notes/add', { class: targets[0], text, subject: S.ntSubject, keep: S.ntKeep });
+        toast('已发布，大屏一分钟内显示 ✓'); $('#ntText').value = '';
+      }
+    }
     loadNotes();
   } catch (e) { toast(e.message); }
 }
@@ -1512,7 +1780,9 @@ function editNote(n) {  // 修改：填回上面的输入框；null = 不改了
   $$('[data-ntsubj]').forEach(b => b.classList.toggle('on', b.dataset.ntsubj === S.ntSubject));
   $$('[data-ntkeep]').forEach(b => b.classList.toggle('on', b.dataset.ntkeep === S.ntKeep));
   $('#ntAdd').lastChild.textContent = n ? '保存修改' : '发布到大屏';
+  $('#ntAdd').disabled = false;
   $('#ntEditBar').classList.toggle('hidden', !n);
+  bcSyncVisibility();
   if (n) { $('#ntText').scrollIntoView({ behavior: 'smooth', block: 'center' }); $('#ntText').focus(); }
 }
 
@@ -1600,20 +1870,23 @@ async function loadReminders() {
     <div class="item" style="cursor:pointer;opacity:${r.enabled ? 1 : .5}" data-editrem="${r.id}">
       <div class="rem-time">${esc(r.time)}</div>
       <div class="main"><div class="txt" style="margin:0;font-weight:700">${esc(r.text)}</div>
-        <div class="meta"><span>${ic('repeat', 'sm')}${daysText(r.days)}</span>${r.voice ? `<span>${ic('volume', 'sm')}播报</span>` : ''}${r.urgent ? `<span>${ic('bolt', 'sm')}紧急</span>` : ''}<span>${ic('user', 'sm')}${esc(r.creator || '')}</span></div></div>
+        <div class="meta"><span>${ic('repeat', 'sm')}${daysText(r.days)}</span>${r.classes.length > 1 ? `<span class="tag" style="background:var(--acc-soft);color:var(--acc-ink)">群发 ${r.classes.length} 班</span>` : ''}${r.voice ? `<span>${ic('volume', 'sm')}播报</span>` : ''}${r.urgent ? `<span>${ic('bolt', 'sm')}紧急</span>` : ''}<span>${ic('user', 'sm')}${esc(r.creator || '')}</span></div></div>
       <label class="switch" data-stop="1"><input type="checkbox" data-togglerem="${r.id}" ${r.enabled ? 'checked' : ''}><span class="track"></span></label>
     </div>`).join('') || empty('还没有定时提醒，比如每天 17:10 提醒值日');
 }
 function editReminder(r) {  // 修改：填回一句话输入框，开着定时
-  if (!r) { setAt(false); $('#qText').value = ''; return quickParse(); }
+  if (!r) { setAt(false); $('#qText').value = ''; bcSetOn('call', false); return quickParse(); }
   $('#qText').value = r.text; $('#optSpeak').checked = !!r.voice; $('#optUrgent').checked = !!r.urgent;
   setAt(true); S.remEdit = r.id; S.remDays = [...r.days]; $('#optAtTime').value = r.time;
+  if (canBroadcast() && r.classes && r.classes.length > 1) bcSetOn('call', true, r.classes);
+  else bcSetOn('call', false);
   syncChips(); renderTip(); quickParse(); window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 // ---------- 课堂 ----------
 const fmt = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 function renderTools() {
+  renderBc('file');
   loadFiles();
   try { S.timer = JSON.parse(store.get('cc_timer') || 'null'); } catch { S.timer = null; }
   tickTimer();
@@ -1867,27 +2140,51 @@ async function loadFiles() {
       ${f.can_delete ? `<button class="btn ghost sm" data-filedel="${f.id}" title="删除">${ic('trash', 'sm')}</button>` : ''}</div>`).join('')
     || '<div class="me">7 天内没有发过文件</div>';
 }
-function uploadFile(file) {
+async function uploadFile(file) {
   const ext = (file.name.split('.').pop() || '').toLowerCase();
   if (!file.name.includes('.') || !FILE_EXTS.includes(ext)) return toast('只能发 Word、PDF、PPT、Excel、网页、图片、mp4 视频这类文件');
   if (file.size > 50 * 1048576) return toast(`文件太大了（${fmtSize(file.size)}），最大 50MB`);
   if (!file.size) return toast('文件是空的');
-  if (!offlineOk('/api/send', { classes: [S.cls] })) return;
+  const targets = bcTargets('file');
+  if (!targets.length) return toast('请先在上方勾选要发送的班级');
   if (S.fileBusy) return toast('上一个文件还在上传');
-  S.fileBusy = true;
+  let url = `/api/files/upload?class=${encodeURIComponent(targets[0])}&name=${encodeURIComponent(file.name)}`;
+  if (targets.length > 1) {
+    const ok = await confirmBroadcast({
+      title: '确认群发文件到大屏', targets, body: `${file.name}（${fmtSize(file.size)}）`,
+      badges: [{ text: '将传到各班大屏「班级文件」' }],
+      note: '文件只上传一次，各班大屏下载好后会弹出提示（保留 7 天）。'
+    });
+    if (!ok) return;
+    S.fileBusy = true;
+    try {
+      const prep = await api('/api/files/prepare', { classes: targets, name: file.name, size: file.size });
+      url = `/api/files/upload?batch=${encodeURIComponent(prep.batch)}&name=${encodeURIComponent(file.name)}`;
+    } catch (e) { S.fileBusy = false; return toast(e.message); }
+  } else {
+    if (!offlineOk('/api/send', { classes: targets })) return;
+    S.fileBusy = true;
+  }
   const done = msg => { S.fileBusy = false; $('#fileProg').classList.add('hidden'); if (msg) toast(msg); };
   $('#fileProg').classList.remove('hidden'); $('#fileBar').style.width = '0';
-  $('#fileProgTxt').textContent = `正在上传 ${file.name}（${fmtSize(file.size)}）…`;
+  $('#fileProgTxt').textContent = `正在${targets.length > 1 ? '群发' : ''}上传 ${file.name}（${fmtSize(file.size)}）…`;
   const xhr = new XMLHttpRequest();
-  xhr.open('POST', `/api/files/upload?class=${encodeURIComponent(S.cls)}&name=${encodeURIComponent(file.name)}`);
+  xhr.open('POST', url);
   xhr.setRequestHeader('Authorization', 'Bearer ' + token);
   xhr.upload.onprogress = e => { if (e.lengthComputable) { const p = Math.round(e.loaded / e.total * 100);
-    $('#fileBar').style.width = p + '%'; $('#fileProgTxt').textContent = `正在上传 ${file.name}：${p}%`; } };
+    $('#fileBar').style.width = p + '%'; $('#fileProgTxt').textContent = `正在${targets.length > 1 ? '群发' : ''}上传 ${file.name}：${p}%`; } };
   xhr.onload = () => {
     let j = {}; try { j = JSON.parse(xhr.responseText); } catch {}
     if (xhr.status === 401) { done(); return showLogin(); }
     if (xhr.status !== 200) return done(j.error || '上传失败，请重试');
-    done('已发到大屏 ✓ 一体机下载好就会弹出'); loadFiles();
+    if (targets.length > 1) {
+      const skip = j.skipped && j.skipped.length ? `（${j.skipped.length} 个班空间已满已跳过）` : '';
+      bcSetOn('file', false);
+      done(`已群发文件给 ${j.count || targets.length} 个班 ✓ 一体机下载好就会弹出${skip}`);
+    } else {
+      done('已发到大屏 ✓ 一体机下载好就会弹出');
+    }
+    loadFiles();
   };
   xhr.onerror = () => done('网络断了，请重试');
   xhr.send(file);
@@ -2075,7 +2372,7 @@ async function reloadClasses(select) {
   D = await api('/api/classes');
   if (select) S.cls = select;
   if (!D.classes.some(c => c.name === S.cls)) S.cls = D.classes[0]?.name || '';
-  fillClassSelect(); store.set('cc_cls', S.cls); renderNav();
+  fillClassSelect(); store.set('cc_cls', S.cls); renderNav(); bcSyncVisibility();
   S.roster = await api('/api/roster'); renderClasses(); go(S.view); refresh();
 }
 
@@ -2147,17 +2444,18 @@ function showTrack(m, state) {
 }
 function trackMessages(list) {
   if (!S.seen) { S.seen = new Set(list.map(m => m.id)); return; }  // 打开页面前的旧消息不提醒
+  let beeped = false;
   list.slice().reverse().forEach(m => {
     if (m.sender !== me || !TRACK_KINDS.includes(m.kind) || S.seen.has(m.id)) return;
     const prev = S.trk[m.id];
     if (prev !== m.status) {
       S.trk[m.id] = m.status;
-      if (m.status === 'acked') { showTrack(m, 'ok'); beep(); try { navigator.vibrate && navigator.vibrate([60, 40, 60]); } catch {} }
+      if (m.status === 'acked') { showTrack(m, 'ok'); if (!beeped) { beep(); beeped = true; try { navigator.vibrate && navigator.vibrate([60, 40, 60]); } catch {} } }
       else if (m.status === 'delivered') showTrack(m, 'sent');
       else if (m.status === 'pending') showTrack(m, S.online[m.class] === false ? 'off' : 'wait');
       else if (m.status === 'scheduled') { S.trackId === m.id && $('#track').classList.add('hidden'); }
     } else if (m.status === 'delivered' && m.delivered_ago >= 180 && !S.warned.has(m.id)) {
-      S.warned.add(m.id); showTrack(m, 'warn'); beep();
+      S.warned.add(m.id); showTrack(m, 'warn'); if (!beeped) { beep(); beeped = true; }
     }
   });
 }
@@ -2167,6 +2465,7 @@ async function refresh() {
     const r = await api('/api/recent?class=' + encodeURIComponent(S.cls));
     const changed = JSON.stringify([r.online[S.cls], r.period, r.exam]) !== JSON.stringify([S.online[S.cls], S.period, S.exam]);
     S.online = r.online; S.recent = r.messages; S.period = r.period; S.exam = r.exam;
+    bcUpdateDots();
     if (S.speakFor !== !!(r.period && r.period.in_class)) speakDefault(); else renderTip();
     trackMessages(r.messages);
     $('#clsDot').classList.toggle('on', !!S.online[S.cls]);
@@ -2298,7 +2597,21 @@ document.addEventListener('click', async e => {
     return;
   }
   const rc = t.closest('[data-recall]');
-  if (rc) { if (!confirm('撤回这条消息？教室大屏上的提示会自动关闭。')) return; try { await api('/api/recall', { id: +rc.dataset.recall }); refresh(); } catch (err) { toast(err.message); } }
+  if (rc) { if (!confirm('撤回这条消息？教室大屏上的提示会自动关闭。')) return; try { await api('/api/recall', { id: +rc.dataset.recall }); refresh(); } catch (err) { toast(err.message); } return; }
+  const bcc = t.closest('[data-bccls]');
+  if (bcc) { const sc = bcc.dataset.bccls, c = bcc.dataset.cls, st = S.bc[sc]; st.set.has(c) ? st.set.delete(c) : st.set.add(c); return renderBc(sc); }
+  const bca = t.closest('[data-bcall]');
+  if (bca) { const sc = bca.dataset.bcall, all = bcClassNames(), st = S.bc[sc]; st.set = st.set.size === all.length ? new Set() : new Set(all); return renderBc(sc); }
+  const bcg = t.closest('[data-bcgrp]');
+  if (bcg) { const sc = bcg.dataset.bcgrp, g = bcg.dataset.bcg, st = S.bc[sc];
+    const list = (bcGradeGroups(bcClassNames()).find(x => x[0] === g) || [, []])[1];
+    const full = list.length && list.every(c => st.set.has(c));
+    list.forEach(c => full ? st.set.delete(c) : st.set.add(c));
+    return renderBc(sc); }
+  const bccur = t.closest('[data-bccur]');
+  if (bccur) { const sc = bccur.dataset.bccur; S.bc[sc].set = S.cls ? new Set([S.cls]) : new Set(); return renderBc(sc); }
+  const bcclr = t.closest('[data-bcclear]');
+  if (bcclr) { const sc = bcclr.dataset.bcclear; S.bc[sc].set = new Set(); return renderBc(sc); }
 });
 document.addEventListener('change', async e => {
   const dt = e.target.closest('[data-dutytask]'); if (dt) { (S.duty[String(S.dutyDay)] || [])[+dt.dataset.dutytask].task = dt.value; return; }
@@ -2308,6 +2621,7 @@ document.addEventListener('change', async e => {
 document.addEventListener('input', e => {
   if (e.target.id === 'hwMinCustom') syncChips();
   if (e.target.closest('#cdRows')) renderBoardPreview();
+  if (e.target.dataset && e.target.dataset.bcfilter) { const sc = e.target.dataset.bcfilter; S.bc[sc].filter = e.target.value; renderBcListOnly(sc); }
 });
 $('#clsSel').onchange = () => {
   if ($('#clsSel').value === '__manage__') { $('#clsSel').value = S.cls; return openClasses(); }
@@ -2621,7 +2935,10 @@ $('#schReset').onclick = async () => {
   if (!confirm(`${S.cls} 不再用单独作息，改回全校作息？`)) return;
   try { await api('/api/schedule', { scope: 'class', class: S.cls, reset: true }); toast('已改回全校作息'); loadBoard(); refresh(); } catch (e) { toast(e.message); }
 };
-$$('.mask').forEach(m => m.addEventListener('click', e => { if (e.target === m) m.classList.add('hidden'); }));  // 点弹窗外面的暗处关闭
+BC_SCOPES.forEach(sc => { const cb = $(BC_EL[sc].cb); if (cb) cb.addEventListener('change', () => bcSetOn(sc, cb.checked)); });
+$('#bcConfirmNo').onclick = () => closeBcConfirm(false);
+$('#bcConfirmYes').onclick = () => closeBcConfirm(true);
+$$('.mask').forEach(m => m.addEventListener('click', e => { if (e.target === m) { if (m.id === 'bcConfirmMask') closeBcConfirm(false); else m.classList.add('hidden'); } }));  // 点弹窗外面的暗处关闭
 setInterval(refresh, 3000);
 setInterval(() => { if (S.view === 'tools') tickTimer(); }, 500);
 
