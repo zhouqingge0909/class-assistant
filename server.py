@@ -446,9 +446,15 @@ last_seen = {}                           # 班级 -> 最近一次轮询时间
 shots, shot_req = {}, {}                 # 看大屏：班级 -> {img, type, at, err}（只在内存里，2 分钟后作废）；班级 -> 老师点"看一眼"的时间
 file_batches = {}                        # 群发文件预处理：batch_id -> {uid, classes, skipped, name, exp}（只在内存里，5 分钟过期）
 login_fails = {}                         # ip -> [失败次数, 首次失败时间]
+reg_fails = {}                           # ip -> [注册码输错次数, 首次失败时间]
 reg_counts = {}                          # ip -> [日期, 今天注册次数]
 send_log = {}                            # 老师 uid -> 最近一小时上大屏的时间戳（公共模式限频）
 SEND_LIMIT, HEAD_LIMIT, REMINDER_LIMIT, TEXT_LIMIT = 60, 3, 30, 200  # 公共模式的限制
+
+
+def reg_enabled():
+    """是否开放老师自助注册：公共模式看是否设了注册码且未暂停；本校/自建服务器还要先在工作台打开开关"""
+    return bool((PUBLIC or settings.get("register_open")) and settings.get("register_code") and not settings.get("register_paused"))
 
 
 def make_chime():
@@ -1810,14 +1816,16 @@ class Handler(BaseHTTPRequestHandler):
         if u.path in ("/setup", "/setup.html"):
             return self.send_file("setup.html")
         if u.path in ("/register", "/register.html"):
-            return self.send_file("register.html") if PUBLIC else self.send_json({"error": "not found"}, 404)
+            return self.send_file("register.html")
+        if u.path == "/api/register/status":
+            return self.send_json({"open": reg_enabled(), "public": PUBLIC})
         if u.path == "/api/register/info":
-            if not PUBLIC:
-                return self.send_json({"error": "not found"}, 404)
             s = self.sess()
             if not is_owner(s):
                 return self.deny("owner")
-            return self.send_json({"url": f"http://{self.host()}/register", "code": settings.get("register_code", ""), "paused": bool(settings.get("register_paused")),
+            return self.send_json({"url": f"http://{self.host()}/register", "code": settings.get("register_code", ""),
+                                   "open": bool(PUBLIC or settings.get("register_open")),
+                                   "paused": bool(settings.get("register_paused")), "public": PUBLIC, "active": reg_enabled(),
                                    "classes": len(load_students()), "teachers": len(users["users"])})
         if u.path == "/kylin/version":
             with open(os.path.join(BASE, "kylin", "receiver.py"), "rb") as f:
@@ -1855,7 +1863,7 @@ class Handler(BaseHTTPRequestHandler):
             mine = self.my_classes()
             return self.send_json({"classes": [{"name": c, "students": students[c]} for c in mine],
                                    "roles": {c: self.role(c) for c in mine}, "admin": is_admin(s), "owner": is_owner(s),
-                                   "me": s["name"], "mine": None, "public": PUBLIC,
+                                   "me": s["name"], "mine": None, "public": PUBLIC, "register_open": reg_enabled(),
                                    "no_schedule": [c for c in mine if c not in settings.get("class_schedule", {})] if PUBLIC else [],
                                    "places": CFG["places"], "voices": VOICES,
                                    "default_voice": default_voice(), "subjects": CFG["subjects"],
@@ -2094,9 +2102,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/device/bind":
             return self.api_device_bind(body)
         if u.path == "/api/register":
-            return self.api_register(body) if PUBLIC else self.send_json({"error": "not found"}, 404)
-        if u.path == "/api/register/code" and not PUBLIC:
-            return self.send_json({"error": "not found"}, 404)
+            return self.api_register(body)
         name = self.teacher()
         if not name:
             return self.send_json({"error": "请先登录"}, 401)
@@ -2216,30 +2222,42 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"ok": True, "token": token, "name": name, "class": cls, "role": role})
 
     def api_register(self, body):
-        """公共服务器：网友用注册码自己建班，注册的人就是这个班的班主任"""
+        """老师用注册码自己建班，注册的人就是这个班的班主任（公共模式与自建服务器开关模式共用）"""
         code = str(body.get("code") or "").strip()
         cls = re.sub(r"\s+", "", str(body.get("class") or ""))
         want = settings.get("register_code") or ""
-        if not want or settings.get("register_paused"):
+        if not reg_enabled():
             return self.send_json({"error": "暂未开放注册"}, 403)
-        if not hmac.compare_digest(code.encode(), want.encode()):
-            return self.send_json({"error": "注册码不对，请向发给你链接的老师确认"}, 403)
+        ip, d = self.client_ip(), today()
+        with lock:
+            fails = reg_fails.get(ip)
+            if fails and fails[0] >= 10 and time.time() - fails[1] < 600:
+                return self.send_json({"error": "注册码错误次数过多，请 10 分钟后再试"}, 429)
+            if not hmac.compare_digest(code.encode(), want.encode()):
+                if not fails or time.time() - fails[1] >= 600:
+                    reg_fails[ip] = [1, time.time()]
+                else:
+                    fails[0] += 1
+                msg = "注册码不对，请向发给你链接的老师确认" if PUBLIC else "注册码不对，请向学校管理员确认"
+                return self.send_json({"error": msg}, 403)
+            reg_fails.pop(ip, None)
         if not cls:
             return self.send_json({"error": "请填写班级名称"}, 400)
         if len(cls) > 16:
             return self.send_json({"error": "班级名称最长 16 个字"}, 400)
         if cls.startswith("_") or not re.fullmatch(r"[\w·（）\-]+", cls):
             return self.send_json({"error": "班级名称只能用汉字、字母、数字"}, 400)
-        ip, d = self.client_ip(), today()
         s = self.sess()
         if is_admin(s):
             return self.send_json({"error": "管理员请在工作台「班级管理」里建班"}, 400)
+        cap = 5 if PUBLIC else 100  # 本校全校共用校园网出口 IP 时避免误伤
         with lock:
             rc = reg_counts.get(ip)
-            if rc and rc[0] == d and rc[1] >= 5:
+            if rc and rc[0] == d and rc[1] >= cap:
                 return self.send_json({"error": "今天注册次数太多了，请明天再试"}, 429)
             if cls in load_students():
-                return self.send_json({"error": "这个班级名已被使用，请在前面加上学校名"}, 400)
+                msg = "这个班级名已被使用，请在前面加上学校名" if PUBLIC else "这个班级名已被使用，请换一个名称"
+                return self.send_json({"error": msg}, 400)
             if s:  # 已登录的老师：新班加到自己名下
                 uid, name = s["uid"], s["name"]
                 token = (self.headers.get("Authorization") or "").replace("Bearer ", "")
@@ -2263,18 +2281,30 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"ok": True, "token": token, "name": name, "class": cls})
 
     def api_register_code(self, body, sender):
-        if "paused" in body:  # 管理员暂停/恢复注册，注册码不变
+        if "open" in body:  # 自建服务器：管理员在工作台一键开启/关闭老师自助注册（不改已有教室密钥）
+            on = bool(body["open"])
+            with lock:
+                settings["register_open"] = on
+                if on:
+                    settings["register_paused"] = False
+                    if not settings.get("register_code"):
+                        alphabet = "abcdefghjkmnpqrstuvwxyz23456789"
+                        settings["register_code"] = "".join(secrets.choice(alphabet) for _ in range(6))
+                write_json(SETTINGS_PATH, settings)
+            return self.send_json({"ok": True, "open": bool(PUBLIC or settings.get("register_open")),
+                                   "code": settings.get("register_code", ""), "active": reg_enabled()})
+        if "paused" in body:  # 公共模式：管理员暂停/恢复注册，注册码不变
             with lock:
                 settings["register_paused"] = bool(body["paused"])
                 write_json(SETTINGS_PATH, settings)
-            return self.send_json({"ok": True, "paused": settings["register_paused"]})
+            return self.send_json({"ok": True, "paused": settings["register_paused"], "active": reg_enabled()})
         code = str(body.get("code") or "").strip()
         if not re.fullmatch(r"[A-Za-z0-9]{4,20}", code):
             return self.send_json({"error": "注册码要 4–20 位字母或数字"}, 400)
         with lock:
             settings["register_code"] = code
             write_json(SETTINGS_PATH, settings)
-        self.send_json({"ok": True, "code": code})
+        self.send_json({"ok": True, "code": code, "active": reg_enabled()})
 
     def api_login_link(self, body):
         """用"我的登录码"在另一台设备上登录"""

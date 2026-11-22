@@ -408,6 +408,7 @@
       <div class="field"><label>管理员密码</label><input class="input" id="lgPwd" type="password" placeholder="请输入管理员密码"></div>
       <div class="err" id="lgErr"></div>
       <button class="btn primary big" id="lgBtn" style="--acc:#1fb57a">登录</button>
+      <div id="lgRegLink" class="hidden" style="text-align:center;margin-top:14px;font-size:13.5px;color:var(--muted)"></div>
     </div>
   </div>
 </div>
@@ -433,6 +434,7 @@
       <div id="schTip" class="card hidden" style="margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#fdf6ec;border:1px solid #ecd9b0">
         <div style="flex:1 1 220px;line-height:1.7"><b>请先在「大屏」栏目设置本班的作息时间</b><br><span style="color:var(--muted);font-size:14px">大屏要按作息判断上课还是下课：上课时消息只在角落提示、不出声</span></div>
         <button class="btn primary" id="schTipBtn">去设置</button></div>
+      <div id="emptyMain" class="card hidden" style="text-align:center;padding:44px 20px"></div>
       <div class="hero" id="hero"></div>
 
       <!-- ---------- 喊话 ---------- -->
@@ -726,7 +728,7 @@
             <div class="row" style="gap:8px;margin-top:14px"><button class="btn primary" id="examSave"><svg class="i sm"><use href="#i-check"/></svg>保存</button><button class="btn ghost" id="examCancel">取消</button></div>
           </div>
         </div>
-        <div class="grid2">
+        <div class="grid2" id="boardCfgGrid">
           <div class="card">
             <button class="btn primary big" data-boardshow="1" style="margin-bottom:10px"><svg class="i"><use href="#i-board"/></svg>现在在大屏显示看板</button>
             <button class="btn soft big" id="shotBtn" style="margin-bottom:18px"><svg class="i"><use href="#i-board"/></svg>看一眼大屏（现在显示什么）</button>
@@ -795,7 +797,7 @@
 
       <!-- ---------- 记录 ---------- -->
       <section class="view" data-view="log">
-        <div class="card">
+        <div class="card" id="recentCard">
           <div class="ctitle"><div class="ib"><svg class="i"><use href="#i-log"/></svg></div><div><h2>发送记录</h2><div class="sub">最近 40 条，未确认的可以撤回</div></div></div>
           <div class="list" id="recent"></div>
         </div>
@@ -831,16 +833,27 @@
             <p class="me" style="display:block;white-space:normal;margin:8px 0 0">改完后，其他用密码登录的设备都会退出，你这台不受影响。扫码加入的老师不受影响。</p></div>
         </div>
         <div class="card hidden" id="regCard">
-          <div class="ctitle"><div class="ib"><svg class="i"><use href="#i-user"/></svg></div><div><h2>网友注册</h2>
-            <div class="sub" id="regSub">网友打开注册链接、填注册码，就能自己建班</div></div></div>
-          <div class="sec"><div class="label">注册链接</div>
-            <div class="row"><code id="regUrl" style="flex:1;background:var(--soft);padding:10px 12px;border-radius:10px;font-size:13px;word-break:break-all"></code>
-              <button class="btn soft sm" id="regCopy">复制</button></div></div>
-          <div class="sec"><div class="label">注册码 <span class="me" id="regNow"></span></div>
-            <div class="row"><input class="input grow" id="regCode" maxlength="20" placeholder="4–20 位字母或数字，如 banji2026">
-              <button class="btn primary sm" id="regSave"><svg class="i sm"><use href="#i-save"/></svg>保存</button></div>
-            <p class="me" style="display:block;white-space:normal;margin:8px 0 0">改了注册码后，记得告诉还没注册的老师。已经注册的老师不受影响。</p></div>
-          <div class="sec"><div class="label">暂停注册 <span class="me" id="regPauseNow"></span></div>
+          <div class="ctitle"><div class="ib"><svg class="i"><use href="#i-user"/></svg></div><div><h2 id="regTitle">老师自助建班注册</h2>
+            <div class="sub" id="regSub">开启后，各班班主任打开链接填注册码就能自己建班</div></div></div>
+          <div class="sec hidden" id="regOpenSec">
+            <label class="switch" style="display:flex"><input type="checkbox" id="regOpen"><span class="track"></span>开放老师自助注册</label>
+            <p class="me" id="regOpenTip" style="display:block;white-space:normal;margin:8px 0 0;line-height:1.65"></p>
+          </div>
+          <div id="regDetail">
+            <div class="sec"><div class="label" id="regUrlLbl">注册链接</div>
+              <div class="row"><code id="regUrl" style="flex:1;background:var(--soft);padding:10px 12px;border-radius:10px;font-size:13px;word-break:break-all"></code>
+                <button class="btn soft sm" id="regCopy">复制</button></div>
+              <div id="regQrWrap" class="hidden" style="margin-top:12px;text-align:center;padding:12px;border-radius:14px;background:var(--soft)">
+                <img id="regQr" style="width:156px;height:156px;border-radius:10px;background:#fff;padding:4px;display:block;margin:0 auto" alt="注册二维码">
+                <div class="me" style="justify-content:center;font-size:12.5px;margin-top:6px;white-space:normal">也可把二维码截图发到学校老师群，微信扫码打开后填注册码即可建班</div>
+              </div>
+            </div>
+            <div class="sec"><div class="label">注册码 <span class="me" id="regNow"></span></div>
+              <div class="row"><input class="input grow" id="regCode" maxlength="20" placeholder="4–20 位字母或数字，如 banji2026">
+                <button class="btn primary sm" id="regSave"><svg class="i sm"><use href="#i-save"/></svg>保存</button></div>
+              <p class="me" id="regCodeTip" style="display:block;white-space:normal;margin:8px 0 0">改了注册码后，记得告诉还没注册的老师。已经注册的老师不受影响。</p></div>
+          </div>
+          <div class="sec hidden" id="regPauseSec"><div class="label">暂停注册 <span class="me" id="regPauseNow"></span></div>
             <div class="row"><button class="btn soft sm" id="regPause"></button></div>
             <p class="me" style="display:block;white-space:normal;margin:8px 0 0">服务器忙不过来时点这里：暂停后谁都注册不了、也建不了新班，注册页显示"暂未开放注册"；已经注册的老师照常使用。注册码不会变。</p></div>
         </div>
@@ -1267,7 +1280,7 @@ async function api(path, body) {
 }
 const cls = () => D.classes.find(c => c.name === S.cls);
 const curRole = () => D.admin ? 'admin' : (D.roles || {})[S.cls] || 'teacher';
-const TEACHER_VIEWS = ['call', 'homework', 'tools', 'log'];
+const TEACHER_VIEWS = ['call', 'homework', 'tools', 'board', 'log'];
 const canView = v => curRole() !== 'teacher' || TEACHER_VIEWS.includes(v);
 const voiceOpts = () => ({ voice_name: $('#voiceSel').value, ...($('#optSpeak').checked ? {} : { voice: false }) });
 const hash = s => [...s].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
@@ -1276,6 +1289,14 @@ function showLogin() {
   $('#appView').classList.add('hidden'); $('#loginView').classList.remove('hidden'); $('#lgName').value = me;
   $('#loginArt').innerHTML = ART.call;
   $('#lgStandalone').classList.toggle('hidden', !(navigator.standalone || matchMedia('(display-mode: standalone)').matches));
+  $('#lgRegLink').classList.add('hidden');
+  fetch('/api/register/status').then(r => r.ok ? r.json() : null).then(st => {
+    if (!st || !st.open) return;
+    $('#lgRegLink').innerHTML = st.public
+      ? '还没有班级？<a href="/register" style="color:var(--acc-ink);font-weight:700">自助建班注册 →</a>'
+      : '班主任自助建班？<a href="/register" style="color:var(--acc-ink);font-weight:700">点这里填注册码建班 →</a>';
+    $('#lgRegLink').classList.remove('hidden');
+  }).catch(() => {});
 }
 async function login() {
   $('#lgErr').textContent = '';
@@ -1296,11 +1317,29 @@ async function start() {
   if (!D.classes.some(c => c.name === S.cls)) S.cls = D.classes[0]?.name || '';
   fillClassSelect();
   if (!D.classes.length) {
-    document.querySelector('main').innerHTML = `<div class="card" style="text-align:center;padding:50px 20px"><h2>还没有加入任何班级</h2>
-      <p class="me" style="justify-content:center;margin-top:8px;white-space:normal">${D.admin ? '你是管理员：点顶部下拉框"＋ 添加 / 管理班级…"建第一个班' : '请扫描班主任发给你的二维码加入班级'}</p>
-      ${D.public && !D.admin ? '<a class="btn primary" href="/register" style="margin-top:16px;display:inline-flex">＋ 建一个班</a>' : ''}</div>`;
+    $('#hero').classList.add('hidden'); $('#rosterTip').classList.add('hidden'); $('#schTip').classList.add('hidden');
+    $$('section.view').forEach(el => el.classList.remove('on'));
+    $('#emptyMain').innerHTML = `<h2>${D.admin ? '还没有班级' : '还没有加入任何班级'}</h2>
+      <p class="me" style="justify-content:center;margin-top:8px;white-space:normal">${D.admin
+        ? (D.owner ? '可以手动建第一个班，或者打开「老师自助注册」让各班班主任自己建班' : '你是管理员：点下面按钮或顶部下拉框"＋ 添加 / 管理班级…"建第一个班')
+        : '请扫描班主任发给你的二维码加入班级'}</p>
+      <div class="row" style="justify-content:center;gap:10px;margin-top:16px;flex-wrap:wrap">
+        ${D.admin ? '<button class="btn primary" id="emptyAddCls">＋ 添加班级</button>' : ''}
+        ${D.owner ? '<button class="btn soft" id="emptyRegBtn">老师自助建班注册</button>' : ''}
+        ${(D.public || D.register_open) && !D.admin ? '<a class="btn primary" href="/register">＋ 建一个班</a>' : ''}
+      </div>`;
+    $('#emptyMain').classList.remove('hidden');
+    if ($('#emptyAddCls')) $('#emptyAddCls').onclick = openClasses;
+    if ($('#emptyRegBtn')) $('#emptyRegBtn').onclick = () => {
+      $('#recentCard').classList.add('hidden'); $('#exCard').classList.add('hidden');
+      document.querySelector('section[data-view="log"]').classList.add('on');
+      loadRegister(); loadAdmins(); loadBackups();
+      setTimeout(() => $('#regCard').scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+    };
     $('#sideNav').innerHTML = ''; $('#tabNav').innerHTML = ''; return;
   }
+  $('#emptyMain').classList.add('hidden'); $('#hero').classList.remove('hidden');
+  $('#recentCard').classList.remove('hidden'); $('#exCard').classList.remove('hidden');
   $('#voiceSel').innerHTML = D.voices.map(v => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join('');
   const sv = store.get('cc_voice');
   $('#voiceSel').value = D.voices.some(v => v.id === sv) ? sv : D.default_voice;
@@ -1310,14 +1349,16 @@ async function start() {
 
 function renderNav() {
   renderSubjects();
-  const vs = VIEWS.filter(([v]) => canView(v));
-  const roleTxt = { admin: '管理员', head: '班主任', teacher: '任课老师' }[curRole()];
-  const side = vs.map(([v, name, c]) => `<button data-go="${v}" style="--c:${c}"><span class="ib">${ic(v === 'tools' ? 'tools' : v)}</span><span>${name}</span></button>`).join('');
+  const role = curRole(), vs = VIEWS.filter(([v]) => canView(v));
+  const roleTxt = { admin: '管理员', head: '班主任', teacher: '任课老师' }[role];
+  const vname = (v, name) => v === 'board' && role === 'teacher' ? '考试' : name;
+  const vicon = v => v === 'board' && role === 'teacher' ? 'cal' : v === 'tools' ? 'tools' : v;
+  const side = vs.map(([v, name, c]) => `<button data-go="${v}" style="--c:${c}"><span class="ib">${ic(vicon(v))}</span><span>${vname(v, name)}</span></button>`).join('');
   $('#sideNav').innerHTML = side + `<div class="foot">你在${esc(S.cls)}的身份：<b>${roleTxt}</b><br>大屏在线时，班级旁会亮起<b style="color:#1fb57a"> 绿点</b></div>`;
   const cur = (D.classes || []).find(c => c.name === S.cls);
-  $('#rosterTip').classList.toggle('hidden', !cur || cur.students.length > 0 || !['admin', 'head'].includes(curRole()));
-  $('#schTip').classList.toggle('hidden', !cur || curRole() !== 'head' || !(D.no_schedule || []).includes(S.cls));
-  $('#tabNav').innerHTML = vs.map(([v, name, c]) => `<button data-go="${v}" style="--c:${c}">${ic(v, 'lg')}<span>${name}</span></button>`).join('');
+  $('#rosterTip').classList.toggle('hidden', !cur || cur.students.length > 0 || !['admin', 'head'].includes(role));
+  $('#schTip').classList.toggle('hidden', !cur || role !== 'head' || !(D.no_schedule || []).includes(S.cls));
+  $('#tabNav').innerHTML = vs.map(([v, name, c]) => `<button data-go="${v}" style="--c:${c}">${ic(vicon(v), 'lg')}<span>${vname(v, name)}</span></button>`).join('');
 }
 function go(v) {
   if (!VIEWS.some(x => x[0] === v) || !canView(v)) v = 'call';
@@ -1989,7 +2030,12 @@ async function saveExam() {
   } catch (err) { toast(err.message); }
 }
 async function loadBoard() {
-  loadSchedule(); loadExamBoard();
+  const isHead = curRole() !== 'teacher';
+  $('#boardCfgGrid').classList.toggle('hidden', !isHead);
+  closeExamForm();
+  loadExamBoard();
+  if (!isHead) return;
+  loadSchedule();
   try { S.settings = await api('/api/settings?class=' + encodeURIComponent(S.cls)); } catch { return; }
   const qt = S.settings.quotes || {};
   $('#qtOn').checked = qt.enabled !== false; $('#qtBuiltin').checked = qt.builtin !== false;
@@ -2278,7 +2324,7 @@ function fillClassSelect() {
   const canManage = D.admin || Object.values(D.roles || {}).includes('head');
   $('#clsSel').innerHTML = D.classes.map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('')
     + (canManage ? `<option value="__manage__">${D.admin ? '＋ 添加 / 管理班级…' : '班级管理 · 邀请老师…'}</option>` : '')
-    + (D.public && !D.admin ? '<option value="__register__">＋ 再建一个班</option>' : '');
+    + ((D.public || D.register_open) && !D.admin ? '<option value="__register__">＋ 再建一个班</option>' : '');
   $('#clsSel').value = S.cls;
 }
 async function openClasses() {
@@ -2372,6 +2418,9 @@ async function reloadClasses(select) {
   D = await api('/api/classes');
   if (select) S.cls = select;
   if (!D.classes.some(c => c.name === S.cls)) S.cls = D.classes[0]?.name || '';
+  if (!D.classes.length || !$('#voiceSel').options.length) {
+    S.roster = await api('/api/roster'); renderClasses(); return start();
+  }
   fillClassSelect(); store.set('cc_cls', S.cls); renderNav(); bcSyncVisibility();
   S.roster = await api('/api/roster'); renderClasses(); go(S.view); refresh();
 }
@@ -2750,19 +2799,46 @@ $('#pwSave').onclick = async () => {
   } catch (e) { toast(e.message); }
 };
 async function loadRegister() {
-  $('#regCard').classList.toggle('hidden', !(D.public && D.owner));
-  if (!(D.public && D.owner)) return;
+  $('#regCard').classList.toggle('hidden', !D.owner);
+  if (!D.owner) return;
   let r; try { r = await api('/api/register/info'); } catch { return; }
+  const pub = !!r.public, open = !!r.open;
+  $('#regTitle').textContent = pub ? '网友注册' : '老师自助建班注册';
+  $('#regSub').textContent = pub
+    ? `已注册 ${r.classes} 个班级、${r.teachers} 位老师`
+    : `当前共 ${r.classes} 个班级、${r.teachers} 位老师 · ${open ? '正在开放自助注册' : '已关闭'}`;
+  $('#regOpenSec').classList.toggle('hidden', pub);
+  $('#regPauseSec').classList.toggle('hidden', !pub);
+  $('#regDetail').classList.toggle('hidden', !pub && !open);
+  $('#regQrWrap').classList.toggle('hidden', pub || !open);
+  $('#regUrlLbl').textContent = pub ? '注册链接' : '注册链接与二维码';
   $('#regUrl').textContent = r.url;
-  $('#regNow').textContent = r.code ? `· 现在是 ${r.code}` : '· 还没设置，网友暂时不能注册';
+  if (!pub && open) $('#regQr').src = '/api/qr?t=' + encodeURIComponent(r.url);
+  $('#regNow').textContent = r.code ? `· 现在是 ${r.code}` : (pub ? '· 还没设置，网友暂时不能注册' : '· 还没设置，请先保存一个注册码');
   $('#regCode').value = r.code;
-  $('#regSub').textContent = `已注册 ${r.classes} 个班级、${r.teachers} 位老师`;
-  S.regPaused = !!r.paused;
-  $('#regPauseNow').textContent = r.paused ? '· 已暂停，网友现在不能注册' : '· 正常开放中';
-  $('#regPauseNow').style.color = r.paused ? '#d9480f' : '';
-  $('#regPause').textContent = r.paused ? '恢复注册' : '暂停注册';
-  $('#regPause').className = 'btn sm ' + (r.paused ? 'primary' : 'soft');
+  if (!pub) {
+    $('#regOpen').checked = open;
+    $('#regOpenTip').textContent = open
+      ? '已开放：把下面的注册链接（或二维码截图）和注册码发到学校老师群，各班班主任填写后就能自己建班（每人最多建 3 个班）。全校建完班后把开关关掉即可，已建班级不受影响。'
+      : '已关闭（默认）：只有管理员能在「班级管理」里建班。学校班级多时打开此开关，让各班班主任自助建班，无需改配置文件或重启，也不影响已装好的一体机、管理员群发和桌面云认班。';
+    $('#regCodeTip').textContent = '改了注册码后，记得告诉还没注册的老师；已经注册的老师不受影响。';
+  } else {
+    $('#regCodeTip').textContent = '改了注册码后，记得告诉还没注册的老师。已经注册的老师不受影响。';
+    S.regPaused = !!r.paused;
+    $('#regPauseNow').textContent = r.paused ? '· 已暂停，网友现在不能注册' : '· 正常开放中';
+    $('#regPauseNow').style.color = r.paused ? '#d9480f' : '';
+    $('#regPause').textContent = r.paused ? '恢复注册' : '暂停注册';
+    $('#regPause').className = 'btn sm ' + (r.paused ? 'primary' : 'soft');
+  }
 }
+$('#regOpen').onchange = async () => {
+  const open = $('#regOpen').checked;
+  try {
+    const r = await api('/api/register/code', { open });
+    toast(open ? `已开放老师自助注册 ✓ 注册码：${r.code}（可随时修改）` : '已关闭老师自助注册 ✓ 已建班级不受影响');
+    loadRegister();
+  } catch (e) { $('#regOpen').checked = !open; toast(e.message); }
+};
 $('#regPause').onclick = async () => {
   const p = !S.regPaused;
   if (p && !confirm('暂停后网友就不能注册、也不能再建新班了（已经注册的老师不受影响）。确定暂停吗？')) return;

@@ -43,18 +43,24 @@
   <h1 id="title">建一个班</h1>
   <p class="lead" id="lead">注册后你就是这个班的班主任，可以邀请任课老师一起用</p>
   <div id="meBox"></div>
-  <label for="code">注册码<span class="hint">向发给你链接的老师要</span></label>
-  <input id="code" maxlength="20" autocomplete="off" placeholder="注册码">
-  <div id="nameBox">
-    <label for="name">你的称呼<span class="hint">会显示在你发的每条消息上</span></label>
-    <input id="name" maxlength="20" placeholder="如：数学王老师">
+  <div id="closedBox" style="display:none;text-align:center;padding:10px 4px 4px">
+    <div id="closedMsg" style="background:#f6f8fa;border-radius:16px;padding:16px;color:#5d6b80;font-size:14.5px;line-height:1.75;text-align:left"></div>
+    <a href="/" style="display:block;width:100%;font-weight:800;font-size:16px;border-radius:16px;padding:13px;margin-top:16px;color:#fff;text-decoration:none;background:linear-gradient(135deg,#16a571,#34d399);box-shadow:0 8px 20px rgba(22,165,113,.3)">返回工作台</a>
   </div>
-  <label for="cls">班级名称<span class="hint">最长 16 个字</span></label>
-  <input id="cls" maxlength="16" placeholder="如：阳光中学高一3班">
-  <div class="sub">请带上学校名，避免和别的学校重名</div>
-  <button id="go">注册并进入工作台</button>
-  <div class="err" id="err"></div>
-  <div class="privacy">
+  <div id="regForm">
+    <label for="code">注册码<span class="hint" id="codeHint">向发给你链接的老师要</span></label>
+    <input id="code" maxlength="20" autocomplete="off" placeholder="注册码">
+    <div id="nameBox">
+      <label for="name">你的称呼<span class="hint">会显示在你发的每条消息上</span></label>
+      <input id="name" maxlength="20" placeholder="如：数学王老师">
+    </div>
+    <label for="cls">班级名称<span class="hint">最长 16 个字</span></label>
+    <input id="cls" maxlength="16" placeholder="如：阳光中学高一3班">
+    <div class="sub" id="clsSub">请带上学校名，避免和别的学校重名</div>
+    <button id="go">注册并进入工作台</button>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="privacy" id="privacyBox">
     <b>隐私说明</b>
     <ul>
       <li>本服务由一位老师个人免费提供，数据存在国内的云服务器上。</li>
@@ -72,6 +78,30 @@ const token = (() => { try { return localStorage.getItem('cc_token') || ''; } ca
 const save = (t, n) => { try { if (t) localStorage.setItem('cc_token', t); localStorage.setItem('cc_name', n); } catch {} };
 let me = null;
 (async () => {
+  try {
+    const sr = await fetch('/api/register/status');
+    if (sr.ok) {
+      const st = await sr.json();
+      if (!st.public) {
+        $('#codeHint').textContent = '向学校管理员要';
+        $('#cls').placeholder = '如：高一3班';
+        $('#clsSub').textContent = '直接填本班名称即可，如“高一3班”“初二5班”';
+        $('#privacyBox').innerHTML = '<b>使用说明</b><ul><li>本服务由本校自行部署，数据仅保存在本校服务器上。</li><li>注册后你将成为该班班主任，可在工作台导入学生名单、邀请任课老师。</li><li>每位老师最多自助建 3 个班；管理员关闭自助注册后，已建班级照常使用。</li></ul>';
+      }
+      if (!st.open) {
+        $('#title').textContent = '暂未开放注册';
+        $('#lead').textContent = st.public ? '当前已暂停自助注册' : '管理员当前已关闭老师自助注册';
+        $('#regForm').style.display = 'none';
+        $('#privacyBox').style.display = 'none';
+        $('#foot').style.display = 'none';
+        $('#closedMsg').textContent = st.public
+          ? '服务器当前暂停新班注册；已经注册过的老师不受影响，可以直接返回工作台继续使用。'
+          : '如需自助建班，请联系学校管理员在工作台「记录 → 老师自助建班注册」中打开开关；如果是加入已有班级，请扫描班主任发的二维码。';
+        $('#closedBox').style.display = 'block';
+        return;
+      }
+    }
+  } catch {}
   if (!token) return;
   try { const r = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } }); if (r.ok) me = await r.json(); } catch {}
   if (!me || me.admin) { me = null; return; }
