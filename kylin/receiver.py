@@ -8,6 +8,7 @@
 """
 import ctypes
 import ctypes.util
+from collections import deque
 import hashlib
 import json
 import os
@@ -15,6 +16,7 @@ import queue
 import random
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -96,28 +98,36 @@ CLASS = ""
 KEY = ""
 BOUND_MAC = ""
 Q_CLASS = Q_KEY = ""
-POLL_URL = BOARD_URL = ACK_URL = TOOL_URL = COLLECT_URL = ATTEND_URL = ""
+POLL_URL = BOARD_URL = ACK_URL = TOOL_URL = COLLECT_URL = ATTEND_URL = EXAM_STATUS_URL = ""
 SHOW_FLAG = os.path.join(HERE, "show-board")  # 桌面"班级看板"图标会创建这个文件
+EXAM_AUDIO_DIR = os.path.join(HERE, "exam_audio")  # 考试与平时听力本地缓存目录（考完 7 天自动清理）
+EXAM_AUDIO_INDEX = os.path.join(HERE, "exam_audio_index.json")
 FFPLAY = None if WIN else shutil.which("ffplay")
 APLAY = None if WIN or FFPLAY else (shutil.which("paplay") or shutil.which("aplay"))  # 没有 ffplay 时用系统自带的放 wav（局域网版的语音和叮咚都是 wav）
 audio_lock = threading.Lock()
 
 
+def audio_cap_level():
+    """本机听力播放能力：2=完整支持 MP3/WAV 与暂停续播；1=仅 aplay/paplay（仅 WAV、不支持断点暂停）；0=无播放器"""
+    return 2 if (WIN or FFPLAY) else (1 if APLAY else 0)
+
+
 def set_binding(cls, key, mac=""):
     """更新当前绑定的班级、教室密钥和所有请求地址（单班模式启动设一次；桌面云模式自动绑定/解绑时切换）"""
-    global CLASS, KEY, BOUND_MAC, Q_CLASS, Q_KEY, POLL_URL, BOARD_URL, ACK_URL, TOOL_URL, COLLECT_URL, ATTEND_URL
+    global CLASS, KEY, BOUND_MAC, Q_CLASS, Q_KEY, POLL_URL, BOARD_URL, ACK_URL, TOOL_URL, COLLECT_URL, ATTEND_URL, EXAM_STATUS_URL
     CLASS, KEY, BOUND_MAC = cls or "", key or "", mac or ""
     if CLASS and KEY:
         Q_CLASS, Q_KEY = urllib.parse.quote(CLASS), urllib.parse.quote(KEY)
         mac_q = f"&mac={urllib.parse.quote(BOUND_MAC)}" if BOUND_MAC else ""
-        POLL_URL = f"{SERVER}/api/poll?class={Q_CLASS}&key={Q_KEY}&rv=4{mac_q}"  # rv：3 起认得远程卸载指令，4 起会下载老师发来的文件
+        POLL_URL = f"{SERVER}/api/poll?class={Q_CLASS}&key={Q_KEY}&rv=6&acap={audio_cap_level()}{mac_q}"  # rv：3 卸载，4 文件，5 听力，6 可靠 ack
         BOARD_URL = f"{SERVER}/api/board?class={Q_CLASS}&key={Q_KEY}&fv=2"  # fv：认得中文字体名的新版
         ACK_URL = f"{SERVER}/api/ack?key={Q_KEY}"
         TOOL_URL = f"{SERVER}/api/screen/tool?key={Q_KEY}"  # 屏幕右边「工具」：在大屏上直接开计时、抽号
         COLLECT_URL = f"{SERVER}/collect?class={Q_CLASS}&key={Q_KEY}"
         ATTEND_URL = f"{SERVER}/attend?class={Q_CLASS}&key={Q_KEY}"
+        EXAM_STATUS_URL = f"{SERVER}/api/exams/audio/status?key={Q_KEY}"
     else:
-        Q_CLASS = Q_KEY = POLL_URL = BOARD_URL = ACK_URL = TOOL_URL = COLLECT_URL = ATTEND_URL = ""
+        Q_CLASS = Q_KEY = POLL_URL = BOARD_URL = ACK_URL = TOOL_URL = COLLECT_URL = ATTEND_URL = EXAM_STATUS_URL = ""
 
 
 if not AUTO_MODE:
@@ -389,6 +399,758 @@ def send_ack(msg_id):
         except Exception as e:
             log(f"确认失败：{e}")
     threading.Thread(target=run, daemon=True).start()
+
+
+def send_ack_sync(msg_id, timeout=3, retries=2, ack_url=None):
+    """同步可靠回执（用于远程卸载前确认服务端已真正记录，支持幂等重试与撤销识别）
+    返回："acked"（确认可执行卸载）、"cancelled"（已撤销/过期/不存在，放弃卸载）、"failed"（网络失败，保留接收端重试）"""
+    url = ack_url if ack_url is not None else ACK_URL
+    if not url or not msg_id:
+        return "failed"
+    payload = json.dumps({"id": msg_id}).encode()
+    for i in range(max(1, int(retries))):
+        try:
+            req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                raw = r.read().decode("utf-8", "replace")
+            try:
+                j = json.loads(raw) if raw.strip() else {}
+            except ValueError:
+                j = {}
+            if j.get("cancelled") or j.get("status") in ("cancelled", "expired", "not_found"):
+                return "cancelled"
+            if j.get("ok"):
+                return "acked"
+        except urllib.error.HTTPError as e:
+            if e.code == 403:
+                log(f"同步确认被拒绝（403）：{e}")
+                return "cancelled"
+            log(f"同步确认失败（HTTP {e.code}）：{e}")
+        except Exception as e:
+            log(f"同步确认失败：{e}")
+        if i + 1 < retries:
+            time.sleep(0.3)
+    return "failed"
+
+
+def fmt_mmss(sec):
+    s = max(0, int(round(float(sec or 0))))
+    return f"{s // 60:02d}:{s % 60:02d}"
+
+
+_STATUS_Q = queue.Queue(maxsize=64)
+_STATUS_STARTED = [False]
+_STATUS_LOCK = threading.Lock()
+
+
+def _status_worker():
+    while True:
+        url, body = _STATUS_Q.get()
+        try:
+            post_json(url, body, timeout=8)
+        except Exception:
+            pass
+
+
+def report_exam_audio_status(payload, url=None, cls=None):
+    """单线程串行异步上报听力缓存进度或播控状态（保证顺序不覆盖，网络不通静默忽略，绝不卡界面）"""
+    url = url if url is not None else EXAM_STATUS_URL
+    cls = cls if cls is not None else CLASS
+    if not url or not cls:
+        return
+    with _STATUS_LOCK:
+        if not _STATUS_STARTED[0]:
+            _STATUS_STARTED[0] = True
+            threading.Thread(target=_status_worker, daemon=True).start()
+    body = dict(payload, **{"class": cls, "acap": audio_cap_level()})
+    try:
+        _STATUS_Q.put_nowait((url, body))
+    except queue.Full:
+        try:
+            _STATUS_Q.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            _STATUS_Q.put_nowait((url, body))
+        except queue.Full:
+            pass
+
+
+def file_sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(256 * 1024)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+class ExamAudioCache:
+    """考试与平时听力本地缓存器：后台静默预下载 + SHA-256 校验（下坏自动重下）+ 7 天自动清理"""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._test_lock = threading.Lock()
+        self._wake = threading.Event()
+        self._items = {}  # audio_id -> item dict (当前看板清单)
+        self._prio = {}   # audio_id -> item dict (手动立刻请求的高优项)
+        self._reported = {}  # audio_id -> last ready report ts
+        self._retry_after = {}  # audio_id -> (next_ts, fail_cnt)
+        self._index = self._load_index()
+        self._test_prefetched = False
+        self.clean_old()
+        threading.Thread(target=self._worker, daemon=True).start()
+
+    def _load_index(self):
+        try:
+            with open(EXAM_AUDIO_INDEX, encoding="utf-8") as f:
+                d = json.load(f)
+                return d if isinstance(d, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _save_index(self):
+        try:
+            os.makedirs(EXAM_AUDIO_DIR, exist_ok=True)
+            with open(EXAM_AUDIO_INDEX + ".tmp", "w", encoding="utf-8") as f:
+                json.dump(self._index, f, ensure_ascii=False)
+            os.replace(EXAM_AUDIO_INDEX + ".tmp", EXAM_AUDIO_INDEX)
+        except OSError:
+            pass
+
+    def reset(self):
+        """VOI 切换/解绑班级时清空旧班下载队列与上报记录，防串班"""
+        with self._lock:
+            self._items.clear()
+            self._prio.clear()
+            self._reported.clear()
+            self._retry_after.clear()
+            self._test_prefetched = False
+
+    def clean_old(self):
+        cutoff = time.time() - 14 * 86400
+        with self._lock:
+            old = [k for k, v in self._index.items() if v.get("at", 0) < cutoff and k not in self._items and k not in self._prio]
+            for k in old:
+                p = self._index[k].get("path")
+                if p and os.path.isfile(p):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+                self._index.pop(k, None)
+            if old:
+                self._save_index()
+                log(f"已清理 {len(old)} 个 14 天前的听力缓存文件")
+
+    def get_ready_path(self, aid, expected_sha=""):
+        if not aid:
+            return None
+        with self._lock:
+            rec = self._index.get(aid)
+        if not rec or not rec.get("path") or not os.path.isfile(rec["path"]):
+            return None
+        if expected_sha and rec.get("sha256") != expected_sha:
+            return None
+        return rec["path"]
+
+    def sync(self, items):
+        if not isinstance(items, list):
+            return
+        fresh = {}
+        for it in items:
+            aid = it.get("id")
+            if aid:
+                fresh[aid] = dict(it)
+        with self._lock:
+            # 保留正在退避重试的优先下载项，避免滞后看板把临时失败的新曲从清单中挤掉
+            now_s = time.time()
+            for k, t_wait in list(self._retry_after.items()):
+                if k not in fresh and k in self._items and t_wait > now_s - 60:
+                    fresh[k] = self._items[k]
+            self._items = fresh
+            # 清理不再在清单中的退避状态
+            for k in list(self._retry_after):
+                if k not in fresh and k not in self._prio:
+                    self._retry_after.pop(k, None)
+        if fresh and not self._test_prefetched:
+            self._test_prefetched = True
+            threading.Thread(target=self.fetch_test_audio, daemon=True).start()
+        self._wake.set()
+
+    def request_now(self, item):
+        if item and item.get("id"):
+            aid = item["id"]
+            with self._lock:
+                self._prio[aid] = dict(item)
+                self._retry_after.pop(aid, None)
+            self._wake.set()
+
+    def fetch_test_audio(self):
+        """下载 10 秒考前试音文件到本地缓存（线程安全，只下一次）"""
+        with self._test_lock:
+            cache = os.path.join(HERE, "sound")
+            os.makedirs(cache, exist_ok=True)
+            local = os.path.join(cache, "exam_test.wav")
+            if os.path.isfile(local) and os.path.getsize(local) > 1000:
+                return local
+            tmp = f"{local}.{threading.get_ident()}.tmp"
+            try:
+                with urllib.request.urlopen(SERVER + "/audio/exam_test.wav", timeout=20) as r:
+                    data = r.read()
+                if len(data) > 1000:
+                    with open(tmp, "wb") as f:
+                        f.write(data)
+                    os.replace(tmp, local)
+                    return local
+            except Exception as e:
+                log(f"下载考前试音音频失败：{e}")
+            finally:
+                try:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
+                except OSError:
+                    pass
+            try:
+                return fetch_sound("/audio/chime.wav")
+            except Exception:
+                return None
+
+    def _download_one(self, it, force=False):
+        aid, ext, want_sha = it["id"], it.get("ext") or "mp3", it.get("sha256") or ""
+        total = int(it.get("size") or 0)
+        snap_cls, snap_qcls, snap_qkey, snap_surl = CLASS, Q_CLASS, Q_KEY, EXAM_STATUS_URL
+        if not snap_cls or not snap_qcls or not snap_qkey:
+            return False
+        os.makedirs(EXAM_AUDIO_DIR, exist_ok=True)
+        dst = os.path.join(EXAM_AUDIO_DIR, f"{aid}.{ext}")
+        # 1. 快速复用本地已校验缓存（比对 size + mtime，避免每分钟重算几十 MB 的 SHA-256；活跃命中超 1 天时续期防清理）
+        if os.path.isfile(dst):
+            try:
+                st = os.stat(dst)
+                now = time.time()
+                fast_hit = False
+                need_report = False
+                with self._lock:
+                    rec = self._index.get(aid)
+                    if rec and rec.get("path") == dst and rec.get("size") == st.st_size and rec.get("mtime") == st.st_mtime and (not want_sha or rec.get("sha256") == want_sha):
+                        fast_hit = True
+                        self._prio.pop(aid, None)
+                        if now - rec.get("at", 0) > 86400:
+                            rec["at"] = now
+                            self._save_index()
+                        if now - self._reported.get(aid, 0) >= 55:
+                            self._reported[aid] = now
+                            need_report = True
+                if fast_hit:
+                    if need_report:
+                        report_exam_audio_status({"audio_id": aid, "cache_status": "ready", "pct": 100}, url=snap_surl, cls=snap_cls)
+                    return True
+                got_sha = file_sha256(dst)
+                if not want_sha or got_sha == want_sha:
+                    now = time.time()
+                    need_report = False
+                    with self._lock:
+                        old_at = (self._index.get(aid) or {}).get("at") or st.st_mtime
+                        new_at = now if now - old_at > 86400 else old_at
+                        self._index[aid] = {"path": dst, "sha256": got_sha, "size": st.st_size, "mtime": st.st_mtime, "at": new_at}
+                        self._save_index()
+                        self._prio.pop(aid, None)
+                        if now - self._reported.get(aid, 0) >= 55:
+                            self._reported[aid] = now
+                            need_report = True
+                    if need_report:
+                        report_exam_audio_status({"audio_id": aid, "cache_status": "ready", "pct": 100}, url=snap_surl, cls=snap_cls)
+                    return True
+            except OSError:
+                pass
+        # 2. 非强制重试时检查单文件退避时间，防止单个损坏/超时文件阻塞整个队列
+        now = time.time()
+        with self._lock:
+            nxt_ts, fails = self._retry_after.get(aid, (0.0, 0))
+        if not force and now < nxt_ts:
+            return False
+        url = f"{SERVER}{it.get('url') or ('/exam-audio/' + aid)}?class={snap_qcls}&key={snap_qkey}"
+        tmp = f"{dst}.{threading.get_ident()}.part"
+        try:
+            report_exam_audio_status({"audio_id": aid, "cache_status": "downloading", "pct": 0}, url=snap_surl, cls=snap_cls)
+            h = hashlib.sha256()
+            got, last_pct = 0, 0
+            with urllib.request.urlopen(url, timeout=60) as r, open(tmp, "wb") as f:
+                clen = int(r.headers.get("Content-Length") or total or 0)
+                while True:
+                    if CLASS != snap_cls:  # VOI 切班/解绑，立即中止
+                        raise RuntimeError("班级已切换")
+                    chunk = r.read(256 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    h.update(chunk)
+                    got += len(chunk)
+                    if clen > 0:
+                        pct = min(99, int(got * 100 / clen))
+                        if pct - last_pct >= 15:
+                            last_pct = pct
+                            report_exam_audio_status({"audio_id": aid, "cache_status": "downloading", "pct": pct}, url=snap_surl, cls=snap_cls)
+            digest = h.hexdigest()
+            if want_sha and digest != want_sha:
+                raise ValueError("SHA-256 校验不一致")
+            if CLASS != snap_cls:
+                raise RuntimeError("班级已切换")
+            os.replace(tmp, dst)
+            st = os.stat(dst)
+            with self._lock:
+                self._index[aid] = {"path": dst, "sha256": digest, "size": st.st_size, "mtime": st.st_mtime, "at": time.time()}
+                self._save_index()
+                self._retry_after.pop(aid, None)
+                self._prio.pop(aid, None)
+                self._reported[aid] = time.time()
+            report_exam_audio_status({"audio_id": aid, "cache_status": "ready", "pct": 100}, url=snap_surl, cls=snap_cls)
+            log(f"听力预下载并校验通过：{it.get('name', aid)} ({got} B)")
+            return True
+        except urllib.error.HTTPError as e:
+            log(f"听力下载 HTTP {e.code}：{it.get('name', aid)}")
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+            if e.code in (403, 404):  # 无权或已删除：停止反复重试，不阻塞其他文件
+                with self._lock:
+                    self._retry_after[aid] = (time.time() + 300, fails + 1)
+                    self._prio.pop(aid, None)
+            else:
+                with self._lock:
+                    self._retry_after[aid] = (time.time() + min(60, 8 * (fails + 1)), fails + 1)
+                    if CLASS == snap_cls:
+                        self._items.setdefault(aid, dict(it))
+            if CLASS == snap_cls:
+                report_exam_audio_status({"audio_id": aid, "cache_status": "error", "pct": 0, "err": f"HTTP {e.code}"}, url=snap_surl, cls=snap_cls)
+            return False
+        except Exception as e:
+            log(f"听力下载失败（第 {fails + 1} 次）：{e}")
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+            if CLASS == snap_cls:
+                with self._lock:
+                    self._retry_after[aid] = (time.time() + min(60, 8 * (fails + 1)), fails + 1)
+                    self._items.setdefault(aid, dict(it))
+                report_exam_audio_status({"audio_id": aid, "cache_status": "error", "pct": 0, "err": f"重试中({fails + 1})"}, url=snap_surl, cls=snap_cls)
+            return False
+
+    def _worker(self):
+        while True:
+            self._wake.wait(15)
+            self._wake.clear()
+            self.clean_old()
+            with self._lock:
+                # 每次高优请求只跳过退避一次，取出即从 _prio 弹出；若暂时失败则转入 _items 走正常退避，防死循环卡队列
+                prio_list = list(self._prio.values())
+                self._prio.clear()
+                prio_ids = {x["id"] for x in prio_list}
+                norm_list = [x for aid, x in self._items.items() if aid not in prio_ids]
+            for it in prio_list:
+                if not CLASS or not KEY:
+                    break
+                self._download_one(it, force=True)
+            for it in norm_list:
+                if not CLASS or not KEY:
+                    break
+                self._download_one(it, force=False)
+
+
+def _drain_stderr(pipe, tail):
+    """持续抽干 ffplay 的 stderr 管道，避免长时间播放 MP3 警告写满 64KB 缓冲区导致播放器静默卡死"""
+    try:
+        for raw in pipe:
+            line = raw.decode("utf-8", "ignore").strip()
+            if line:
+                tail.append(line[:80])
+    except Exception:
+        pass
+    finally:
+        try:
+            pipe.close()
+        except Exception:
+            pass
+
+
+class ExamAudioPlayer:
+    """跨平台可控听力播放器：Windows 用系统自带 winmm MCI（单线程 + 音轨代际/操作序号防竞态），麒麟/Linux 用 ffplay（干净停启续播 + 管道防阻塞 + 异常码检测）"""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._gen = 0      # 音轨代际号：仅在 play_file / stop 时递增，pause / resume 不改变音轨代际
+        self._op_seq = 0   # 控制操作序号：play / pause / resume / stop 均递增，用于跳过已被后续操作覆盖的暂停/继续
+        self._state = "idle"  # idle / playing / paused / done / test_done / error / test_error / testing
+        self._mode = "exam"
+        self._path = ""
+        self._dur = 0.0
+        self._pos = 0.0
+        self._err = ""
+        self._base_pos = 0.0
+        self._started_mono = 0.0
+        self._proc = None
+        self._stderr_tail = deque(maxlen=6)
+        self._stderr_thr = None
+        self._win_q = None
+        if WIN:
+            self._win_q = queue.Queue()
+            threading.Thread(target=self._win_loop, daemon=True).start()
+
+    def can_mp3(self):
+        return bool(WIN or FFPLAY)
+
+    def can_seek(self):
+        return bool(WIN or FFPLAY)
+
+    def _err_state(self, mode=None):
+        m = self._mode if mode is None else mode
+        return "test_error" if m == "test" else "error"
+
+    # ---- Windows 单线程 MCI 驱动 ----
+    def _mci_call(self, cmd):
+        buf = ctypes.create_unicode_buffer(256)
+        err = ctypes.windll.winmm.mciSendStringW(cmd, buf, 255, None)
+        return err, buf.value.strip()
+
+    def _mci_err(self, code):
+        try:
+            buf = ctypes.create_unicode_buffer(256)
+            ctypes.windll.winmm.mciGetErrorStringW(int(code), buf, 255)
+            return buf.value.strip() or f"错误码 {code}"
+        except Exception:
+            return f"错误码 {code}"
+
+    def _win_short_path(self, path):
+        try:
+            buf = ctypes.create_unicode_buffer(1024)
+            n = ctypes.windll.kernel32.GetShortPathNameW(path, buf, 1024)
+            if 0 < n < 1024:
+                return buf.value
+        except Exception:
+            pass
+        return path
+
+    def _win_loop(self):
+        alias = "ccexam"
+        opened = False
+        opened_gen = 0
+        opened_mode = "exam"
+        poll_errs = 0
+        while True:
+            try:
+                act, gen, seq, args = self._win_q.get(timeout=0.35)
+            except queue.Empty:
+                if opened and self._win_q.empty():
+                    with self._lock:
+                        st, cur_gen = self._state, self._gen
+                    if cur_gen == opened_gen and st in ("playing", "testing"):
+                        e1, pos_s = self._mci_call(f"status {alias} position")
+                        e2, mode_s = self._mci_call(f"status {alias} mode")
+                        if e2 != 0:
+                            poll_errs += 1
+                            if poll_errs >= 5:
+                                self._mci_call(f"close {alias}")
+                                opened = False
+                                with self._lock:
+                                    if self._gen == opened_gen:
+                                        self._state, self._err = self._err_state(opened_mode), "播放设备异常中断"
+                        else:
+                            poll_errs = 0
+                            need_close = False
+                            with self._lock:
+                                if self._gen == opened_gen:
+                                    if e1 == 0 and pos_s.isdigit():
+                                        self._pos = int(pos_s) / 1000.0
+                                    if mode_s.lower() == "stopped" and self._state in ("playing", "testing"):
+                                        need_close = True
+                                        if opened_mode == "test":
+                                            self._state, self._pos, self._dur, self._mode = "test_done", 0.0, 0.0, "exam"
+                                        else:
+                                            self._pos = self._dur if self._dur > 0 else self._pos
+                                            self._state = "done"
+                            if need_close:
+                                self._mci_call(f"close {alias}")
+                                opened = False
+                continue
+            try:
+                with self._lock:
+                    cur_gen, cur_seq = self._gen, self._op_seq
+                if act == "play":
+                    if gen != cur_gen:
+                        continue  # 已有更新的播放/停止指令，跳过过期的旧音轨
+                    path, dur, seek, mode = args
+                    if opened:
+                        self._mci_call(f"stop {alias}")
+                        self._mci_call(f"close {alias}")
+                        opened = False
+                    safe = self._win_short_path(path).replace('"', '')
+                    e, _ = self._mci_call(f'open "{safe}" type mpegvideo alias {alias}')
+                    if e != 0 and path.lower().endswith(".wav"):
+                        e, _ = self._mci_call(f'open "{safe}" type waveaudio alias {alias}')
+                    if e != 0:
+                        log(f"Windows MCI 打开失败：{self._mci_err(e)} ({path})")
+                        with self._lock:
+                            if self._gen == gen:
+                                self._state, self._err = self._err_state(mode), "系统播放器打不开该音频"
+                        continue
+                    opened = True
+                    opened_gen = gen
+                    opened_mode = mode
+                    poll_errs = 0
+                    self._mci_call(f"set {alias} time format milliseconds")
+                    e_len, len_s = self._mci_call(f"status {alias} length")
+                    mci_dur = int(len_s) / 1000.0 if e_len == 0 and len_s.isdigit() and int(len_s) > 0 else 0.0
+                    # 优先相信服务端准确计算的时长（DirectShow 对 VBR MP3 的 length 经常偏差 2-3 倍）
+                    real_dur = float(dur) if float(dur or 0) > 0 else mci_dur
+                    ms = max(0, int(seek * 1000))
+                    if real_dur > 0 and ms >= int(real_dur * 1000):
+                        ms = max(0, int(real_dur * 1000) - 500)
+                    e_p, _ = self._mci_call(f"play {alias} from {ms}" if ms > 0 else f"play {alias}")
+                    need_stop_close = False
+                    need_close_err = False
+                    need_pause_now = False
+                    with self._lock:
+                        if self._gen != gen:
+                            need_stop_close = True
+                        elif e_p == 0:
+                            self._dur = real_dur
+                            self._pos = ms / 1000.0
+                            self._err = ""
+                            if self._state == "paused":
+                                # 老师在打开音频瞬间就点了暂停：保持暂停态并在锁外立即暂停 MCI
+                                need_pause_now = True
+                            else:
+                                self._state = "testing" if mode == "test" else "playing"
+                        else:
+                            need_close_err = True
+                            self._state, self._err = self._err_state(mode), "启动播放失败"
+                    if need_stop_close:
+                        self._mci_call(f"stop {alias}")
+                        self._mci_call(f"close {alias}")
+                        opened = False
+                    elif need_close_err:
+                        log(f"Windows MCI 播放失败：{self._mci_err(e_p)}")
+                        self._mci_call(f"close {alias}")
+                        opened = False
+                    elif need_pause_now:
+                        self._mci_call(f"pause {alias}")
+                elif act == "pause" and opened:
+                    if gen != cur_gen or gen != opened_gen or seq != cur_seq:
+                        continue
+                    self._mci_call(f"pause {alias}")
+                    e1, pos_s = self._mci_call(f"status {alias} position")
+                    with self._lock:
+                        if self._gen == gen and self._op_seq == seq:
+                            if e1 == 0 and pos_s.isdigit():
+                                self._pos = int(pos_s) / 1000.0
+                            if self._state == "playing":
+                                self._state = "paused"
+                elif act == "resume" and opened:
+                    if gen != cur_gen or gen != opened_gen or seq != cur_seq:
+                        continue
+                    self._mci_call(f"resume {alias}")
+                    with self._lock:
+                        if self._gen == gen and self._op_seq == seq and self._state == "paused":
+                            self._state = "playing"
+                elif act == "stop":
+                    if opened:
+                        self._mci_call(f"stop {alias}")
+                        self._mci_call(f"close {alias}")
+                        opened = False
+                    with self._lock:
+                        if self._gen == gen:
+                            self._state, self._pos, self._dur, self._mode, self._err = "idle", 0.0, 0.0, "exam", ""
+            except Exception as exc:
+                log(f"Windows 听力播放出错：{exc}")
+
+    # ---- 通用控制接口 ----
+    def _stop_posix_locked(self):
+        p = self._proc
+        self._proc = None
+        self._stderr_thr = None
+        if not p:
+            return
+        try:
+            if p.poll() is None:
+                try:
+                    os.killpg(p.pid, signal.SIGTERM)
+                except OSError:
+                    p.terminate()
+                try:
+                    p.wait(timeout=1.0)
+                except Exception:
+                    try:
+                        os.killpg(p.pid, signal.SIGKILL)
+                    except OSError:
+                        p.kill()
+                    try:
+                        p.wait(timeout=1.0)
+                    except Exception:
+                        pass
+        except OSError:
+            pass
+
+    def _spawn_posix_locked(self, path, seek):
+        cmd = None
+        use_seek = seek
+        if FFPLAY:
+            cmd = [FFPLAY, "-nodisp", "-vn", "-autoexit", "-loglevel", "error"]
+            if use_seek > 0.2:
+                cmd += ["-ss", f"{use_seek:.2f}"]
+            cmd.append(path)
+        elif APLAY and path.lower().endswith(".wav"):
+            cmd = [APLAY, path] if APLAY.endswith("paplay") else [APLAY, "-q", path]
+            use_seek = 0.0  # paplay/aplay 不支持定位，进度条从 0 起算避免错位
+        if not cmd:
+            self._state, self._err = self._err_state(), "本机缺少 ffplay 播放器"
+            return False
+        try:
+            tail = deque(maxlen=6)
+            self._stderr_tail = tail
+            p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.PIPE, start_new_session=True)
+            self._proc = p
+            thr = threading.Thread(target=_drain_stderr, args=(p.stderr, tail), daemon=True)
+            self._stderr_thr = thr
+            thr.start()
+            self._base_pos = use_seek
+            self._pos = use_seek
+            self._started_mono = time.monotonic()
+            self._state = "testing" if self._mode == "test" else "playing"
+            return True
+        except Exception as e:
+            self._state, self._err = self._err_state(), f"启动播放器失败：{e}"
+            return False
+
+    def play_file(self, path, duration=0.0, seek=0.0, mode="exam"):
+        if not path or not os.path.isfile(path):
+            with self._lock:
+                self._gen += 1
+                self._op_seq += 1
+                gen, seq = self._gen, self._op_seq
+                if WIN:
+                    self._win_q.put(("stop", gen, seq, None))
+                else:
+                    self._stop_posix_locked()
+                self._mode = mode
+                self._state, self._err = self._err_state(mode), "本地听力文件不存在"
+            return False
+        with self._lock:
+            self._gen += 1
+            self._op_seq += 1
+            gen, seq = self._gen, self._op_seq
+            self._path = path
+            self._dur = float(duration or 0)
+            self._mode = mode
+            self._err = ""
+            pos = max(0.0, float(seek or 0))
+            if self._dur > 1.0 and pos >= self._dur - 0.5:
+                pos = max(0.0, self._dur - 0.5)
+            self._pos = pos
+            if WIN:
+                self._state = "testing" if mode == "test" else "playing"
+                self._win_q.put(("play", gen, seq, (path, self._dur, pos, mode)))
+                return True
+            self._stop_posix_locked()
+            return self._spawn_posix_locked(path, pos)
+
+    def pause(self):
+        if not self.can_seek():
+            return  # 缺 ffplay 的 aplay/paplay 兜底路径不支持断点定位，禁止假暂停
+        with self._lock:
+            if self._state != "playing":
+                return
+            self._op_seq += 1
+            gen, seq = self._gen, self._op_seq
+            if WIN:
+                self._win_q.put(("pause", gen, seq, None))
+                self._state = "paused"
+                return
+            # 麒麟/Linux 端干净停止并记录断点位置，避免 SIGSTOP 引发 PulseAudio 断流或 ALSA 爆音
+            elapsed = self._base_pos + max(0.0, time.monotonic() - self._started_mono)
+            self._base_pos = min(self._dur, elapsed) if self._dur > 0 else elapsed
+            self._pos = self._base_pos
+            self._stop_posix_locked()
+            self._state = "paused"
+
+    def resume(self):
+        if not self.can_seek():
+            return
+        with self._lock:
+            if self._state != "paused":
+                return
+            self._op_seq += 1
+            gen, seq = self._gen, self._op_seq
+            if WIN:
+                self._win_q.put(("resume", gen, seq, None))
+                self._state = "playing"
+                return
+            if self._path and os.path.isfile(self._path):
+                self._spawn_posix_locked(self._path, self._base_pos)
+            else:
+                self._state, self._err = self._err_state(), "本地听力文件不存在"
+
+    def replay(self):
+        with self._lock:
+            path, dur, mode = self._path, self._dur, self._mode
+        if path:
+            return self.play_file(path, dur, 0.0, mode=mode)
+        return False
+
+    def stop(self):
+        with self._lock:
+            self._gen += 1
+            self._op_seq += 1
+            gen, seq = self._gen, self._op_seq
+            if WIN:
+                self._win_q.put(("stop", gen, seq, None))
+            else:
+                self._stop_posix_locked()
+            self._state = "idle"
+            self._pos = 0.0
+            self._base_pos = 0.0
+            self._dur = 0.0
+            self._mode = "exam"
+            self._err = ""
+
+    def snapshot(self):
+        with self._lock:
+            if not WIN and self._state in ("playing", "testing"):
+                run_sec = max(0.0, time.monotonic() - self._started_mono)
+                elapsed = self._base_pos + run_sec
+                rc = self._proc.poll() if self._proc is not None else -1
+                if rc is not None:
+                    thr = self._stderr_thr
+                    self._stderr_thr = None
+                    if thr is not None and thr.is_alive():
+                        thr.join(timeout=0.05)
+                    err_line = self._stderr_tail[-1] if self._stderr_tail else ""
+                    self._proc = None
+                    if rc != 0:
+                        self._state = self._err_state()
+                        self._err = err_line or f"播放器异常退出（代码 {rc}）"
+                        log(f"Linux 听力播放异常退出 rc={rc}: {self._err}")
+                    elif self._mode == "test":
+                        self._state, self._pos, self._dur, self._mode = "test_done", 0.0, 0.0, "exam"
+                    elif (run_sec < 2.5 and (self._dur - self._base_pos) > 15.0) or (
+                        bool(err_line) and self._dur > 15.0 and elapsed < self._dur * 0.85
+                    ):
+                        self._state = "error"
+                        self._err = err_line or "播放器异常提前停止，请点重播或检查音响"
+                        log(f"Linux 听力提前结束：elapsed={elapsed:.1f}s dur={self._dur:.1f}s err={err_line}")
+                    else:
+                        self._pos = self._dur if self._dur > 0 else elapsed
+                        self._state = "done"
+                else:
+                    self._pos = min(self._dur, elapsed) if self._dur > 0 else elapsed
+            return {"state": self._state, "pos": self._pos, "dur": self._dur, "mode": self._mode, "err": self._err}
 
 
 SHOT_PS = r"""Add-Type -AssemblyName System.Windows.Forms,System.Drawing
@@ -1961,7 +2723,9 @@ class MorningBoard:
 
 
 def exam_key(ex):
-    return (ex["key"], ex["start_ts"], ex["end_ts"], ex["subject"], ex["name"], tuple(ex.get("notice") or []), str(ex.get("next")))
+    au = ex.get("audio") or {}
+    return (ex["key"], ex["start_ts"], ex["end_ts"], ex["subject"], ex["name"], tuple(ex.get("notice") or []), str(ex.get("next")),
+            au.get("id"), au.get("start_ts"))
 
 
 EXAM_SAY = {"start": "考试开始，请开始答题", "warn": "距离考试结束还有十五分钟", "end": "考试结束，请停止作答"}
@@ -1970,13 +2734,33 @@ EXAM_SAY = {"start": "考试开始，请开始答题", "warn": "距离考试结�
 class ExamBoard:
     """考试大屏（整屏，深蓝）：开考前显示须知和开考倒计时，考试中显示科目和结束倒计时，结束后提示停笔。
     碰一下屏幕右下角出现"收起考试大屏"按钮（误碰不会收起），收起后右下角留一个小条，点它回到考试大屏；
-    开考、剩 15 分钟、结束时自动回到大屏并各播报一次。到点自动关闭，或老师在工作台点"提前结束"。"""
+    开考、剩 15 分钟、结束时自动回到大屏并各播报一次（配置听力时自动屏蔽开考提示音防冲突）。
+    若本场配有听力，底部显示沉稳低调的听力进度条与监考应急按钮（暂停/继续、重播、停止，重播/停止需二次确认防误触）。"""
     BG, PANEL, LINE_, INK_, SOFT, BLUE, GOLD, RED = "#0f1e2e", "#172c42", "#24425f", "#eaf2fb", "#9fb6cc", "#7cc4ff", "#ffd166", "#ff6b6b"
 
-    def __init__(self, app, ex):
+    def __init__(self, app, ex, adopt=None):
+        adopt = adopt or {}
+        adopt_au = adopt.get("audio")
+        if adopt_au and adopt_au.get("id"):
+            ex = {**ex, "audio": dict(adopt_au)}
         self.app, self.ex, self.phase = app, ex, None
         self.hidden, self.mini, self.hide_btn = False, None, None
         self.key = exam_key(ex)
+        self.audio_auto_done = bool(adopt.get("audio_auto_done"))
+        self.audio_stopped_manual = False
+        self.pending_play_at = adopt.get("pending_play_at")
+        self.pending_audio_id = str(adopt.get("pending_audio_id") or "")
+        self.pending_audio_sha = str(adopt.get("pending_audio_sha") or "")
+        self._last_board_gen = getattr(app, "board_gen", 0)
+        self._cmd_audio = (adopt_au["id"], dict(adopt_au), time.time(), self._last_board_gen) if (adopt_au and adopt_au.get("id")) else None  # 防慢看板把刚收到的新曲冲回旧录音
+        self.confirm_act = None  # ("replay"|"stop"|"early", expire_ts)
+        self.last_dock_sig = None
+        self.last_report_at = 0.0
+        self.last_reported_state = None
+        self.last_reported_err = ""
+        self.playing_audio_id = adopt.get("playing_audio_id") or ""
+        self.test_gen = 0
+        self._not_ready_logged = False
         sw, sh = app.sw, app.sh
         self.win = tk.Toplevel(app.root)
         self.win.overrideredirect(True)
@@ -1988,17 +2772,75 @@ class ExamBoard:
         self.u = sh / 100
         self.L, self.R = sw * 0.045, sw * 0.955
         self.cv.bind("<Button-1>", self.on_touch)
+        self._bind_dock_tags()
         self.tick()
 
+    def _bind_dock_tags(self):
+        """固定按钮 tag 只绑定一次，避免每秒重绘泄漏上万个 Tcl 命令对象"""
+        for act in ("pause_resume", "replay", "stop", "early", "stop_test"):
+            tag = f"aud_btn_{act}"
+            self.cv.tag_bind(tag, "<Button-1>", lambda e, a=act: self._dock_click(a))
+            self.cv.tag_bind(tag, "<Enter>", lambda e: self.cv.config(cursor="hand2"))
+            self.cv.tag_bind(tag, "<Leave>", lambda e: self.cv.config(cursor=""))
+
+    def update_exam(self, ex):
+        """同一场考试原地刷新文案/须知/下一场信息，绝不中断正在播放的考试听力，也不让滞后看板冲掉刚收到的新曲指令"""
+        if not self.win.winfo_exists():
+            return
+        cur_bgen = getattr(self.app, "board_gen", 0)
+        self._last_board_gen = cur_bgen
+        cmd_rec = getattr(self, "_cmd_audio", None)
+        if self.audio_stopped_manual:
+            # 同一场考试停止后，普通看板刷新不能解除停止或换回旧曲；文案仍可更新。
+            # 重新发令可采纳新录音，本地重播沿用停止时的录音，新考试另行初始化。
+            ex = {**ex, "audio": dict(self.ex.get("audio") or {})}
+        elif cmd_rec:
+            c_aid, c_au, c_ts = cmd_rec[0], cmd_rec[1], cmd_rec[2]
+            c_bgen = cmd_rec[3] if len(cmd_rec) > 3 else 0
+            in_au = ex.get("audio") or {}
+            if in_au.get("id") == c_aid and (not c_au.get("sha256") or in_au.get("sha256") == c_au.get("sha256")):
+                self._cmd_audio = None  # 看板已追上最新换曲元数据
+            elif cur_bgen <= c_bgen or time.time() - c_ts < 30.0:
+                ex = {**ex, "audio": dict(c_au)}  # 仍未收到更新代次看板，或仍在途的旧看板响应：保留指令里的权威新录音，绝不回退播旧曲
+            else:
+                self._cmd_audio = None
+        old_aid = (self.ex.get("audio") or {}).get("id")
+        new_aid = (ex.get("audio") or {}).get("id")
+        self.ex = ex
+        self.key = exam_key(ex)
+        if old_aid != new_aid:
+            if getattr(self, "pending_audio_id", "") and self.pending_audio_id != new_aid:
+                self.pending_play_at = None
+                self.pending_audio_id = ""
+                self.pending_audio_sha = ""
+            if self.app.audio_player.snapshot()["state"] in ("idle", "test_done", "test_error", "done", "error"):
+                self.audio_auto_done = False
+                self._not_ready_logged = False
+                self.playing_audio_id = ""
+                self.app.audio_player.stop()
+        if self.phase:
+            now = time.time() + self.app.offset
+            self.draw(self.phase)
+            self._refresh_clock_count(now, self.phase)
+            self.draw_audio_dock(now)
+
+    def has_audio(self):
+        return bool(self.ex.get("audio") and self.ex["audio"].get("id"))
+
     def on_touch(self, e):
-        if "hidebtn" in self.cv.gettags("current"):
-            return  # 点的就是按钮：交给按钮自己处理
+        tags = self.cv.gettags("current")
+        if "hidebtn" in tags or any(t.startswith("aud_") for t in tags):
+            return  # 点的就是按钮或底部听力条：不弹收起按钮
+        dock_vis = (self.has_audio() or self.app.audio_player.snapshot()["state"] in ("playing", "paused", "testing")) and self.phase in ("before", "during")
+        if dock_vis and e.y >= 82.5 * self.u:
+            return
         if self.hide_btn:
             self.cv.after_cancel(self.hide_btn)
         else:
             cv, u, f = self.cv, self.u, self.F(2.8)
             w, h = f.measure("收起考试大屏") + 5 * u, 5 * u
-            x2, y2 = self.R, self.app.sh - 1.2 * u
+            x2 = self.R
+            y2 = (81.5 * u) if dock_vis else (self.app.sh - 1.2 * u)
             round_rect(cv, x2 - w, y2 - h, x2, y2, h / 2, fill="#2b5a85", outline=self.BLUE, width=2, tags="hidebtn")
             cv.create_text(x2 - w / 2, y2 - h / 2, text="收起考试大屏", fill="#ffffff", font=f, tags="hidebtn")
             cv.tag_bind("hidebtn", "<Button-1>", lambda ev: self.collapse())
@@ -2077,12 +2919,13 @@ class ExamBoard:
     def draw(self, phase):
         cv, u, ex, L, R = self.cv, self.u, self.ex, self.L, self.R
         cv.delete("all")
-        self.phase, self.bar_fill = phase, None
+        self.phase, self.bar_fill, self.last_dock_sig = phase, None, None
         if self.hide_btn:
             cv.after_cancel(self.hide_btn)
             self.hide_btn = None
         self.head()
         mins = int(round((ex["end_ts"] - ex["start_ts"]) / 60))
+        has_au = self.has_audio()
         if phase == "before":  # 须知 + 开考倒计时
             cv.create_text(L, 21 * u, text=ex["subject"], anchor="w", fill=self.INK_, font=self.F(10))
             sx = L + self.F(10).measure(ex["subject"]) + 3 * u
@@ -2091,12 +2934,13 @@ class ExamBoard:
             self.box(bx1, 13 * u, R, 37 * u)
             cv.create_text((bx1 + R) / 2, 18 * u, text="距离开考", fill=self.SOFT, font=self.F(3.4))
             self.count = cv.create_text((bx1 + R) / 2, 28.5 * u, text="", fill=self.BLUE, font=self.F(12, True, True))
-            self.box(L, 43 * u, R, 94 * u)
-            cv.create_text(L + 4.5 * u, 50 * u, text="考场须知", anchor="w", fill=self.GOLD, font=self.F(4))
-            lines = (ex.get("notice") or [])[:6]
-            size = 4 if len(lines) <= 4 else 3.4
+            bot = 80.5 * u if has_au else 94 * u
+            self.box(L, 42 * u, R, bot)
+            cv.create_text(L + 4.5 * u, 48 * u, text="考场须知", anchor="w", fill=self.GOLD, font=self.F(3.8 if has_au else 4))
+            lines = (ex.get("notice") or [])[:5 if has_au else 6]
+            size = (3.4 if len(lines) <= 4 else 3.0) if has_au else (4 if len(lines) <= 4 else 3.4)
             for k, ln in enumerate(lines):
-                cv.create_text(L + 5 * u, 58 * u + k * size * 1.75 * u, text="·  " + ellipsis(ln, self.F(size, False), R - L - 12 * u),
+                cv.create_text(L + 5 * u, (55 if has_au else 58) * u + k * size * 1.65 * u, text="·  " + ellipsis(ln, self.F(size, False), R - L - 12 * u),
                                anchor="w", fill=self.INK_, font=self.F(size, False))
         elif phase == "during":  # 科目 + 结束倒计时 + 进度条
             cv.create_text(L, 26 * u, text=ex["subject"], anchor="w", fill=self.INK_, font=self.F(19))
@@ -2108,21 +2952,23 @@ class ExamBoard:
             cv.create_text((bx1 + R) / 2, 19 * u, text="距离考试结束", fill=self.SOFT, font=self.F(3.6))
             self.count = cv.create_text((bx1 + R) / 2, 31 * u, text="", fill=self.GOLD, font=self.F(16, True, True))
             self.status = cv.create_text((bx1 + R) / 2, 44 * u, text="", fill=self.GOLD, font=self.F(3.2))
-            self.bar = (L, 57 * u, R, 59 * u)
+            self.bar = (L, 55.5 * u if has_au else 57 * u, R, 57.5 * u if has_au else 59 * u)
             round_rect(cv, *self.bar, 1 * u, fill="#1d3550", width=0)
             lines = (ex.get("notice") or [])[:3]
             if lines:
-                cv.create_text(L, 66 * u, text="考场提醒", anchor="w", fill=self.SOFT, font=self.F(3.2))
+                cv.create_text(L, (62.5 if has_au else 66) * u, text="考场提醒", anchor="w", fill=self.SOFT, font=self.F(3.0 if has_au else 3.2))
                 for k, ln in enumerate(lines):
-                    cv.create_text(L + 1 * u, 73 * u + k * 6.2 * u, text="·  " + ellipsis(ln, self.F(3.6, False), R - L - 62 * u),
-                                   anchor="w", fill=self.INK_, font=self.F(3.6, False))
+                    cv.create_text(L + 1 * u, (68.2 if has_au else 73) * u + k * (5.0 if has_au else 6.2) * u,
+                                   text="·  " + ellipsis(ln, self.F(3.2 if has_au else 3.6, False), R - L - 62 * u),
+                                   anchor="w", fill=self.INK_, font=self.F(3.2 if has_au else 3.6, False))
             nt = self.next_text()
             if nt:
                 nx1 = R - 54 * u
-                self.box(nx1, 64 * u, R, 92 * u)
-                cv.create_text(nx1 + 3.4 * u, 70 * u, text="下一场", anchor="w", fill=self.SOFT, font=self.F(3))
-                cv.create_text(nx1 + 3.4 * u, 78 * u, text=nt[0], anchor="w", fill=self.INK_, font=self.F(4.8))
-                cv.create_text(nx1 + 3.4 * u, 86 * u, text=nt[1], anchor="w", fill="#cfe0f0", font=self.F(3.4, False, True))
+                ny1, ny2 = (61 * u, 80.5 * u) if has_au else (64 * u, 92 * u)
+                self.box(nx1, ny1, R, ny2)
+                cv.create_text(nx1 + 3.4 * u, ny1 + (ny2 - ny1) * 0.22, text="下一场", anchor="w", fill=self.SOFT, font=self.F(2.7 if has_au else 3))
+                cv.create_text(nx1 + 3.4 * u, ny1 + (ny2 - ny1) * 0.52, text=nt[0], anchor="w", fill=self.INK_, font=self.F(4.4 if has_au else 4.8))
+                cv.create_text(nx1 + 3.4 * u, ny1 + (ny2 - ny1) * 0.80, text=nt[1], anchor="w", fill="#cfe0f0", font=self.F(3.0 if has_au else 3.4, False, True))
         else:  # 结束：停笔
             cx = self.app.sw / 2
             cv.create_text(cx, 38 * u, text="考试结束", fill=self.INK_, font=self.F(15))
@@ -2131,16 +2977,414 @@ class ExamBoard:
             if nt:
                 cv.create_text(cx, 70 * u, text=f"下一场　{nt[0]}　{nt[1]}", fill=self.SOFT, font=self.F(4, False))
 
-    def tick(self):
-        if not self.win.winfo_exists():
-            return
-        now = time.time() + self.app.offset
-        ex, u = self.ex, self.u
-        phase = self.phase_of(now)
-        if phase != self.phase:
-            if self.phase and self.hidden:  # 开考、考试结束：自动回到大屏
+    # ---- 考试听力控制与底部渲染 ----
+    def _adopt_cmd_audio(self, data, start_at):
+        """核对控制指令携带的音频编号与 SHA-256；若与旧看板不一致，立即采纳指令权威元数据，绝不静默播放旧录音"""
+        cur_au = self.ex.get("audio") or {}
+        cmd_aid = str(data.get("audio_id") or "").strip()
+        cmd_sha = str(data.get("sha256") or "").strip()
+        if not cmd_aid:
+            return cur_au
+        if cur_au.get("id") != cmd_aid or (cmd_sha and cur_au.get("sha256") != cmd_sha):
+            new_au = {
+                "id": cmd_aid,
+                "name": data.get("title") or f"{self.ex.get('subject') or '考试'}听力",
+                "ext": data.get("ext") or "mp3",
+                "size": int(data.get("size") or 0),
+                "sha256": cmd_sha,
+                "duration": float(data.get("duration") or 0),
+                "start": cur_au.get("start") or self.ex.get("start", ""),
+                "start_ts": cur_au.get("start_ts") if cur_au.get("start_ts") is not None else start_at,
+                "url": data.get("url") or f"/exam-audio/{cmd_aid}",
+            }
+            self.ex = {**self.ex, "audio": new_au}
+            self.key = exam_key(self.ex)
+            self._cmd_audio = (cmd_aid, dict(new_au), time.time(), getattr(self.app, "board_gen", 0))
+            self._not_ready_logged = False
+            if self.playing_audio_id and self.playing_audio_id != cmd_aid:
+                self.app.audio_player.stop()
+                self.playing_audio_id = ""
+            if hasattr(self.app, "fetch_board_now"):
+                threading.Thread(target=self.app.fetch_board_now, daemon=True).start()
+            self.last_dock_sig = None
+            if self.phase:
+                self.draw(self.phase)
+            log(f"检测到换曲指令（{cur_au.get('id') or '无'} -> {cmd_aid}），已按指令元数据优先切换，不播放旧录音")
+            return new_au
+        return cur_au
+
+    def start_audio(self, seek=0.0, silent=False, trigger_download=True, expected_id="", expected_sha=""):
+        au = self.ex.get("audio") or {}
+        if not au.get("id"):
+            return False
+        if expected_id and au.get("id") != expected_id:
+            log(f"音频编号不匹配（期望 {expected_id}，当前 {au.get('id')}），拒绝播放旧文件")
+            return False
+        if expected_sha and au.get("sha256") and au.get("sha256") != expected_sha:
+            log(f"音频校验值不匹配（{au.get('id')}），拒绝播放旧文件")
+            return False
+        path = self.app.audio_cache.get_ready_path(au.get("id"), expected_sha or au.get("sha256", ""))
+        if not path:
+            if trigger_download:
+                self.app.audio_cache.request_now(au)
+            if not silent and not self._not_ready_logged:
+                self._not_ready_logged = True
+                log("本地听力文件尚未就绪，已触发优先下载")
+            return False
+        self._not_ready_logged = False
+        self.test_gen += 1
+        self.expand()
+        if self.audio_stopped_manual:
+            self._cmd_audio = (au["id"], dict(au), time.time())  # 停止后重播：重新保护当前录音，防迟到看板回退
+        self.audio_auto_done = True
+        self.audio_stopped_manual = False
+        self.pending_play_at = None
+        self.pending_audio_id = ""
+        self.pending_audio_sha = ""
+        self.confirm_act = None
+        ok = self.app.audio_player.play_file(path, float(au.get("duration") or 0), seek=seek, mode="exam")
+        self.playing_audio_id = au.get("id", "") if ok else ""
+        log(f"考试听力开播：{self.ex['subject']} audio={au.get('id')} seek={seek:.1f}s ok={ok}")
+        return ok
+
+    def start_test_audio(self):
+        snap = self.app.audio_player.snapshot()
+        if snap["state"] in ("playing", "paused") and snap["mode"] == "exam":
+            return  # 正式听力播放期间不打断
+        self.expand()
+        self.confirm_act = None
+        self.test_gen += 1
+        tgen, sgen = self.test_gen, self.app.session_gen
+
+        def run():
+            p = self.app.audio_cache.fetch_test_audio()
+
+            def fire():
+                if not self.win.winfo_exists() or sgen != self.app.session_gen or tgen != self.test_gen:
+                    return
+                if self.phase not in ("before", "during"):
+                    return
+                cur = self.app.audio_player.snapshot()
+                if cur["state"] in ("playing", "paused") and cur["mode"] == "exam":
+                    return
+                self.playing_audio_id = ""
+                if not p:
+                    # 试音音频本身下载失败也如实上报异常，且不阻断正式听力自动起播
+                    report_exam_audio_status({"exam_id": self.ex["exam_id"], "idx": self.ex["idx"],
+                                              "audio_id": (self.ex.get("audio") or {}).get("id", ""),
+                                              "play_state": "error", "play_err": "试音音频下载失败", "pos": 0, "dur": 0})
+                    return
+                self.app.audio_player.play_file(p, 10.0, 0.0, mode="test")
+            self.app.root.after(0, fire)
+        threading.Thread(target=run, daemon=True).start()
+        log(f"开始 10 秒考前试音：{self.ex['subject']}")
+
+    def handle_cmd(self, data):
+        act = data.get("action")
+        if act in ("test", "play") and self.phase == "after":
+            return  # 考试已结束：不响应试音或开播指令
+        if act == "test":
+            self.start_test_audio()
+        elif act == "play":
+            start_at = float(data.get("start_at") or (time.time() + self.app.offset))
+            now = time.time() + self.app.offset
+            self.test_gen += 1
+            self.audio_auto_done = True
+            self.audio_stopped_manual = False
+            au = self._adopt_cmd_audio(data, start_at)
+            want_id = str(data.get("audio_id") or au.get("id") or "").strip()
+            want_sha = str(data.get("sha256") or au.get("sha256") or "").strip()
+            if not want_id or au.get("id") != want_id:
+                return
+            self._cmd_audio = (want_id, dict(au), time.time())  # 同曲重新发令也刷新防旧看板覆盖的保护
+            self.pending_audio_id = want_id
+            self.pending_audio_sha = want_sha
+            if not self.app.audio_cache.get_ready_path(want_id, want_sha):
+                self.app.audio_cache.request_now(au)
+                self.pending_play_at = start_at
                 self.expand()
-            self.draw(phase)
+            elif start_at <= now:
+                if not self.start_audio(seek=max(0.0, now - start_at), expected_id=want_id, expected_sha=want_sha):
+                    self.pending_play_at = start_at
+                    self.expand()
+            else:
+                self.pending_play_at = start_at
+                self.expand()
+        elif act == "stop":
+            self.test_gen += 1
+            self.pending_play_at = None
+            self.pending_audio_id = ""
+            self.pending_audio_sha = ""
+            self.audio_stopped_manual = True
+            self.confirm_act = None
+            self.playing_audio_id = ""
+            self.app.audio_player.stop()
+
+    def _dock_click(self, act):
+        now = time.time()
+        snap = self.app.audio_player.snapshot()
+        if act == "pause_resume":
+            if not self.app.audio_player.can_seek():
+                return
+            self.confirm_act = None
+            if snap["state"] == "playing":
+                self.app.audio_player.pause()
+            elif snap["state"] == "paused":
+                self.app.audio_player.resume()
+        elif act == "stop_test":
+            self.test_gen += 1
+            self.confirm_act = None
+            self.playing_audio_id = ""
+            self.app.audio_player.stop()
+        elif act in ("replay", "stop", "early"):
+            if self.confirm_act and self.confirm_act[0] == act and now < self.confirm_act[1]:
+                self.confirm_act = None
+                if act in ("early", "replay"):
+                    self.start_audio(0.0)
+                elif act == "stop":
+                    self.test_gen += 1
+                    self.pending_play_at = None
+                    self.pending_audio_id = ""
+                    self.pending_audio_sha = ""
+                    self.audio_stopped_manual = True
+                    self.playing_audio_id = ""
+                    self.app.audio_player.stop()
+            else:
+                self.confirm_act = (act, now + 4.0)
+        self.last_dock_sig = None
+        self.draw_audio_dock(time.time() + self.app.offset)
+
+    def _dock_btn(self, x1, y1, x2, y2, text, act, bg="#1b344e", outline="#32577c", fg="#b7cee3"):
+        cv, u = self.cv, self.u
+        tag = f"aud_btn_{act}"
+        round_rect(cv, x1, y1, x2, y2, 1.5 * u, fill=bg, outline=outline, width=1.8, tags=("aud_dock", tag))
+        cv.create_text((x1 + x2) / 2, (y1 + y2) / 2, text=text, fill=fg, font=self.F(2.4, True), tags=("aud_dock", tag))
+
+    def draw_audio_dock(self, now):
+        snap = self.app.audio_player.snapshot()
+        raw_st = snap["state"]
+        # 试音结束后（test_done）自动恢复安静待播态，绝不误显“已播完”
+        st = "idle" if raw_st == "test_done" else raw_st
+        if (not self.has_audio() and st not in ("playing", "paused", "testing", "test_error", "error")) or self.phase not in ("before", "during"):
+            self.cv.delete("aud_dock")
+            self.last_dock_sig = None
+            return
+        au = self.ex.get("audio") or {}
+        ready_path = self.app.audio_cache.get_ready_path(au.get("id"), au.get("sha256", "")) if au.get("id") else None
+        pos = snap["pos"]
+        dur = (10.0 if st == "testing" else (snap["dur"] or float(au.get("duration") or 0)))
+        if self.confirm_act and time.time() >= self.confirm_act[1]:
+            self.confirm_act = None
+        cact = self.confirm_act[0] if self.confirm_act else ""
+        # 构建签名：只在画面内容变化时重绘
+        left_wait = max(0, int((self.pending_play_at or au.get("start_ts", now)) - now + 0.999)) if st == "idle" and au else 0
+        sig = (st, int(pos), int(dur), bool(ready_path), left_wait, cact, self.audio_stopped_manual, self.pending_play_at is not None, snap.get("err", ""))
+        if sig == self.last_dock_sig:
+            return
+        self.last_dock_sig = sig
+        cv, u, L, R = self.cv, self.u, self.L, self.R
+        cv.config(cursor="")
+        cv.delete("aud_dock")
+        y1, y2 = 83.5 * u, 96.5 * u
+        mid_y = (y1 + y2) / 2
+        border = "#695d36" if st == "paused" else "#4b7eb3" if st == "testing" else "#284b6e"
+        fill = "#162d46" if st == "testing" else "#14273c"
+        round_rect(cv, L, y1, R, y2, 2.2 * u, fill=fill, outline=border, width=2, tags="aud_dock")
+
+        # 左侧状态图标（矢量绘制/纯中文，确保麒麟 Linux 与 Windows 均无缺字方块）
+        ix1, ix2 = L + 2.4 * u, L + 8.4 * u
+        ic_cx = (ix1 + ix2) / 2
+        ic_bg = "#1b3a54" if st in ("playing", "testing") else "#2e2e20" if st == "paused" else "#153b35" if ready_path else "#243448"
+        ic_fg = self.GOLD if st == "paused" else "#6ee7b7" if (st in ("idle", "done") and ready_path) else self.BLUE
+        round_rect(cv, ix1, mid_y - 3 * u, ix2, mid_y + 3 * u, 1.5 * u, fill=ic_bg, outline=ic_fg, width=1.5, tags="aud_dock")
+        if st == "paused":
+            cv.create_rectangle(ic_cx - 1.15 * u, mid_y - 1.3 * u, ic_cx - 0.35 * u, mid_y + 1.3 * u, fill=ic_fg, width=0, tags="aud_dock")
+            cv.create_rectangle(ic_cx + 0.35 * u, mid_y - 1.3 * u, ic_cx + 1.15 * u, mid_y + 1.3 * u, fill=ic_fg, width=0, tags="aud_dock")
+        elif st == "playing":
+            cv.create_polygon(ic_cx - 0.9 * u, mid_y - 1.35 * u, ic_cx - 0.9 * u, mid_y + 1.35 * u, ic_cx + 1.35 * u, mid_y, fill=ic_fg, width=0, tags="aud_dock")
+        elif st == "testing":
+            cv.create_text(ic_cx, mid_y, text="试", fill=ic_fg, font=self.F(2.8, True), tags="aud_dock")
+        elif st in ("idle", "done") and ready_path:
+            cv.create_line(ic_cx - 1.2 * u, mid_y + 0.1 * u, ic_cx - 0.25 * u, mid_y + 1.15 * u, ic_cx + 1.35 * u, mid_y - 1.05 * u,
+                           fill=ic_fg, width=max(2, int(0.38 * u)), capstyle="round", joinstyle="round", tags="aud_dock")
+        else:
+            cv.create_text(ic_cx, mid_y, text="听", fill=ic_fg, font=self.F(2.8, True), tags="aud_dock")
+
+        tx = ix2 + 2.0 * u
+        subj = self.ex["subject"]
+        bh = 6.2 * u
+        by1, by2 = mid_y - bh / 2, mid_y + bh / 2
+        rx = R - 2.4 * u
+
+        if st == "testing":
+            rem = max(0, int(10.0 - pos + 0.999))
+            tf_, sf_ = self.F(2.7, True), self.F(1.9, False)
+            bw = self.F(2.4, True).measure("结束试音") + 4.4 * u
+            self._dock_btn(rx - bw, by1, rx, by2, "结束试音", "stop_test")
+            max_tw = max(12 * u, rx - bw - tx - 20 * u)
+            t1 = ellipsis("正在播放考前试音 · 请确认教室音响音量", tf_, max_tw)
+            t2 = ellipsis(f"试音结束后自动恢复安静等待（剩余 {rem} 秒）", sf_, max_tw)
+            cv.create_text(tx, mid_y - 1.6 * u, text=t1, anchor="w", fill="#bfe3ff", font=tf_, tags="aud_dock")
+            cv.create_text(tx, mid_y + 2.0 * u, text=t2, anchor="w", fill=self.SOFT, font=sf_, tags="aud_dock")
+            px1 = tx + max(tf_.measure(t1), sf_.measure(t2)) + 3.0 * u
+            px2 = rx - bw - 3.0 * u
+            if px2 > px1 + 10 * u:
+                round_rect(cv, px1, mid_y - 0.7 * u, px2, mid_y + 0.7 * u, 0.7 * u, fill="#1e3752", width=0, tags="aud_dock")
+                frac = min(1.0, max(0.05, pos / 10.0))
+                round_rect(cv, px1, mid_y - 0.7 * u, px1 + (px2 - px1) * frac, mid_y + 0.7 * u, 0.7 * u, fill=self.BLUE, width=0, tags="aud_dock")
+            return
+
+        if st in ("playing", "paused"):
+            can_sk = self.app.audio_player.can_seek()
+            tf_, sf_ = self.F(2.7, True), self.F(1.9, False)
+            t_lbl = f"{subj}听力已暂停" if st == "paused" else f"{subj}听力播放中"
+            s_lbl = ("点右侧「继续」从断点恢复" if st == "paused"
+                     else ("本地缓存 · 断网不中断" if can_sk else "本机缺 ffplay · 仅支持重播/停止"))
+            t_col = self.GOLD if st == "paused" else self.INK_
+
+            # 右侧控场键：停止、重播；仅具备断点定位能力时才显示「暂停/继续」
+            stop_lbl = "再点确认停止" if cact == "stop" else "停止"
+            sw_ = self.F(2.4, True).measure(stop_lbl) + 4.4 * u
+            self._dock_btn(rx - sw_, by1, rx, by2, stop_lbl, "stop",
+                           bg="#3d2229" if cact == "stop" else "#1b344e",
+                           outline=self.RED if cact == "stop" else "#32577c",
+                           fg="#ffc2c2" if cact == "stop" else "#b7cee3")
+            rx -= sw_ + 1.4 * u
+
+            rep_lbl = "再点确认重播" if cact == "replay" else "重播"
+            rw_ = self.F(2.4, True).measure(rep_lbl) + 4.4 * u
+            self._dock_btn(rx - rw_, by1, rx, by2, rep_lbl, "replay",
+                           bg="#3b321d" if cact == "replay" else "#1b344e",
+                           outline=self.GOLD if cact == "replay" else "#32577c",
+                           fg=self.GOLD if cact == "replay" else "#b7cee3")
+            rx -= rw_ + (1.4 * u if can_sk else 2.6 * u)
+
+            if can_sk:
+                pr_lbl = "继续" if st == "paused" else "暂停"
+                pw_ = self.F(2.4, True).measure(pr_lbl) + 4.8 * u
+                self._dock_btn(rx - pw_, by1, rx, by2, pr_lbl, "pause_resume",
+                               bg="#3b321d" if st == "paused" else "#1b344e",
+                               outline=self.GOLD if st == "paused" else "#32577c",
+                               fg=self.GOLD if st == "paused" else "#b7cee3")
+                rx -= pw_ + 2.6 * u
+
+            # 时间与进度条（动态量测左侧文案宽度，杜绝任何字体下重叠）
+            tm_txt = f"{fmt_mmss(pos)} / {fmt_mmss(dur)}"
+            tm_f = self.F(2.8, True, digits=True)
+            tw_ = tm_f.measure(tm_txt)
+            cv.create_text(rx, mid_y, text=tm_txt, anchor="e", fill=self.GOLD if st == "paused" else "#cfe0f0", font=tm_f, tags="aud_dock")
+            px2 = rx - tw_ - 2.4 * u
+            max_lw = max(14 * u, min(36 * u, px2 - tx - 14 * u))
+            t_lbl = ellipsis(t_lbl, tf_, max_lw)
+            s_lbl = ellipsis(s_lbl, sf_, max_lw)
+            cv.create_text(tx, mid_y - 1.6 * u, text=t_lbl, anchor="w", fill=t_col, font=tf_, tags="aud_dock")
+            cv.create_text(tx, mid_y + 2.0 * u, text=s_lbl, anchor="w", fill=self.SOFT, font=sf_, tags="aud_dock")
+            px1 = tx + max(tf_.measure(t_lbl), sf_.measure(s_lbl)) + 2.6 * u
+            if px2 > px1 + 10 * u:
+                round_rect(cv, px1, mid_y - 0.8 * u, px2, mid_y + 0.8 * u, 0.8 * u, fill="#1e3752", width=0, tags="aud_dock")
+                frac = min(1.0, max(0.02, pos / max(1.0, dur)))
+                round_rect(cv, px1, mid_y - 0.8 * u, px1 + (px2 - px1) * frac, mid_y + 0.8 * u, 0.8 * u,
+                           fill=self.GOLD if st == "paused" else self.BLUE, width=0, tags="aud_dock")
+            return
+
+        # 空闲 / 待播 / 播完 / 异常
+        if st == "done":
+            title = f"{subj}听力已播完（{fmt_mmss(dur)}）"
+            sub = "如需重新播放，监考老师可点右侧「重播」"
+            t_col = "#d6f5e8"
+        elif st == "test_error":
+            title = f"考前试音失败：{snap['err'] or '请检查一体机音响'}"
+            sub = "请检查音响连接；到点正式开考仍会自动尝试播放听力"
+            t_col = "#ffd166"
+        elif st == "error":
+            title = f"{subj}听力播放失败：{snap['err'] or '请检查一体机音响'}"
+            sub = "可点右侧重试，或改用本机播放器"
+            t_col = "#ffb4b4"
+        elif not ready_path:
+            title = f"{subj}听力正在后台下载缓存…"
+            sub = "下载完成并校验通过后将自动就绪"
+            t_col = "#cfe0f0"
+        elif self.pending_play_at:
+            title = f"{subj}听力即将同步开始播放（{left_wait} 秒）"
+            sub = "老师已在工作台下发同步开播指令"
+            t_col = "#d6f5e8"
+        elif self.audio_stopped_manual:
+            title = f"{subj}听力已停止"
+            sub = "如需重新开始，可点右侧按钮"
+            t_col = self.SOFT
+        else:
+            title = f"{subj}听力已就绪 · 将于 {au.get('start', '')} 自动开始播放"
+            sub = f"本地音频校验通过（{fmt_mmss(dur)}）" + (f" · 倒计时 {fmt_mmss(left_wait)}" if left_wait > 0 else "") + " · 起播时自动屏蔽开考提示音"
+            t_col = "#d6f5e8"
+
+        btn_space = 0.0
+        if ready_path:
+            act_k = "replay" if (st in ("done", "error") or self.audio_stopped_manual) else "early"
+            lbl = ("再点确认重播" if cact == "replay" else "重播") if act_k == "replay" else ("再点确认开播" if cact == "early" else "提前开播")
+            bw = self.F(2.4, True).measure(lbl) + 4.4 * u
+            self._dock_btn(rx - bw, by1, rx, by2, lbl, act_k,
+                           bg="#3b321d" if cact == act_k else "#1b344e",
+                           outline=self.GOLD if cact == act_k else "#32577c",
+                           fg=self.GOLD if cact == act_k else "#b7cee3")
+            btn_space = bw + 2.4 * u
+
+        avail_w = max(16 * u, rx - btn_space - tx)
+        tf_, sf_ = self.F(2.6, True), self.F(1.9, False)
+        cv.create_text(tx, mid_y - 1.6 * u, text=ellipsis(title, tf_, avail_w), anchor="w", fill=t_col, font=tf_, tags="aud_dock")
+        cv.create_text(tx, mid_y + 2.0 * u, text=ellipsis(sub, sf_, avail_w), anchor="w", fill=self.SOFT, font=sf_, tags="aud_dock")
+
+    def _sync_audio_schedule(self, now):
+        snap = self.app.audio_player.snapshot()
+        active_set = ("playing", "paused", "testing", "error", "test_error")
+        active_audio = snap["state"] in active_set or self.last_reported_state in active_set
+        if (not self.has_audio() and not active_audio) or self.phase not in ("before", "during"):
+            return
+        au = self.ex.get("audio") or {}
+        if self.has_audio():
+            dur = float(au.get("duration") or 0)
+            # 1. 手动同步发令到点起播（超时 > 90s 或超过总时长则放弃防诈尸播放；等待期间只查缓存不反复触发 request_now）
+            if self.pending_play_at is not None and now >= self.pending_play_at:
+                lag = now - self.pending_play_at
+                if lag > 90.0 or (dur > 0 and lag >= dur):
+                    log(f"考试听力手动起播等待超时（{lag:.0f}s），已放弃")
+                    self.pending_play_at = None
+                    self.pending_audio_id = ""
+                    self.pending_audio_sha = ""
+                else:
+                    self.start_audio(seek=max(0.0, lag), silent=True, trigger_download=False,
+                                     expected_id=getattr(self, "pending_audio_id", ""),
+                                     expected_sha=getattr(self, "pending_audio_sha", ""))
+            # 2. 按排定起播时间自动同步起播（误差 < 1 秒；允许抢占试音，且绝不被试音结束 test_done 或试音报错 test_error/error 拦住）
+            elif (not self.audio_auto_done and not self.audio_stopped_manual
+                  and snap["state"] in ("idle", "test_done", "test_error", "testing", "error")
+                  and au["start_ts"] <= now < au["start_ts"] + 90):
+                if self.app.audio_cache.get_ready_path(au["id"], au.get("sha256", "")):
+                    self.start_audio(seek=max(0.0, now - au["start_ts"]), silent=True, trigger_download=False)
+        # 3. 定期上报当前播放状态给工作台（真实上报 error 及原因；播放中始终上报实际正在播放的 playing_audio_id）
+        snap = self.app.audio_player.snapshot()
+        raw_st = snap["state"]
+        rep_st = ("idle" if raw_st == "test_done"
+                  else "error" if raw_st in ("error", "test_error")
+                  else (raw_st if raw_st in ("idle", "playing", "paused", "done", "testing") else "idle"))
+        rep_err = (snap.get("err") or "") if rep_st == "error" else ""
+        prev_err = getattr(self, "last_reported_err", "")
+        if (rep_st != self.last_reported_state or rep_err != prev_err
+                or (rep_st in ("playing", "paused", "testing") and time.time() - self.last_report_at >= 3.0)):
+            self.last_reported_state = rep_st
+            self.last_reported_err = rep_err
+            self.last_report_at = time.time()
+            rep_aid = self.playing_audio_id if (raw_st in ("playing", "paused", "done", "error") and self.playing_audio_id) else au.get("id", "")
+            pl = {
+                "exam_id": self.ex["exam_id"], "idx": self.ex["idx"], "audio_id": rep_aid,
+                "play_state": rep_st,
+                "pos": snap["pos"], "dur": snap["dur"] or au.get("duration", 0),
+            }
+            if rep_err:
+                pl["play_err"] = rep_err
+            report_exam_audio_status(pl)
+
+    def _refresh_clock_count(self, now, phase):
+        ex, u = self.ex, self.u
         t = time.gmtime(now + 8 * 3600)
         self.cv.itemconfig(self.clock, text=time.strftime("%H:%M", t))
         if phase in ("before", "during"):
@@ -2157,16 +3401,76 @@ class ExamBoard:
                     self.cv.delete(self.bar_fill)
                 self.bar_fill = round_rect(self.cv, x1, y1, x1 + max(2 * u, (x2 - x1) * frac), y2, 1 * u, fill=self.RED if last else self.BLUE, width=0)
             if self.mini:
-                self.mini_cv.itemconfig(self.mini_count, text=("剩 " if phase == "during" else "距开考 ") + text,
-                                        fill=self.RED if last else self.GOLD if phase == "during" else self.BLUE)
+                if not self.mini.winfo_exists():
+                    self.mini = None
+                    if self.hidden:
+                        self.expand()
+                else:
+                    try:
+                        self.mini_cv.itemconfig(self.mini_count, text=("剩 " if phase == "during" else "距开考 ") + text,
+                                                fill=self.RED if last else self.GOLD if phase == "during" else self.BLUE)
+                    except tk.TclError:
+                        self.mini = None
+                        if self.hidden:
+                            self.expand()
         elif self.mini:
-            self.mini_cv.itemconfig(self.mini_count, text="考试结束", fill=self.GOLD)
+            if not self.mini.winfo_exists():
+                self.mini = None
+                if self.hidden:
+                    self.expand()
+            else:
+                try:
+                    self.mini_cv.itemconfig(self.mini_count, text="考试结束", fill=self.GOLD)
+                except tk.TclError:
+                    self.mini = None
+                    if self.hidden:
+                        self.expand()
+
+    def tick(self):
+        if not self.win.winfo_exists():
+            # 若考试大屏被系统/热键外部关闭，自动清理引用、停播音频并恢复息屏策略
+            if self.app.exam is self:
+                self.app.exam = None
+                if (self.has_audio() or self.app.audio_player.snapshot()["state"] in ("playing", "paused", "testing", "error", "test_error")
+                        or self.last_reported_state in ("playing", "paused", "testing", "error")):
+                    self.test_gen += 1
+                    self.playing_audio_id = ""
+                    self.app.audio_player.stop()
+                    report_exam_audio_status({"exam_id": self.ex["exam_id"], "idx": self.ex["idx"],
+                                              "audio_id": (self.ex.get("audio") or {}).get("id", ""), "play_state": "idle", "pos": 0, "dur": 0})
+                self.app.x11.allow_sleep()
+            return
+        now = time.time() + self.app.offset
+        ex = self.ex
+        phase = self.phase_of(now)
+        if phase != self.phase:
+            if self.phase and self.hidden:  # 开考、考试结束：自动回到大屏
+                self.expand()
+            if phase == "after" and (self.has_audio() or self.app.audio_player.snapshot()["state"] in ("playing", "paused", "testing", "error", "test_error")
+                                     or self.last_reported_state in ("playing", "paused", "testing", "error")):
+                self.test_gen += 1
+                self.pending_play_at = None
+                self.playing_audio_id = ""
+                self.app.audio_player.stop()
+                self.last_reported_state = "idle"
+                self.last_reported_err = ""
+                report_exam_audio_status({"exam_id": ex["exam_id"], "idx": ex["idx"],
+                                          "audio_id": (ex.get("audio") or {}).get("id", ""), "play_state": "idle", "pos": 0, "dur": 0})
+            self.draw(phase)
+        self._refresh_clock_count(now, phase)
+        self._sync_audio_schedule(now)
+        self.draw_audio_dock(now)
         self.speak(now)
-        self.win.after(1000, self.tick)
+        fast_tick = (self.has_audio() or self.app.audio_player.snapshot()["state"] in ("playing", "paused", "testing", "error", "test_error")
+                     or self.last_reported_state in ("playing", "paused", "testing", "error"))
+        self.win.after(500 if fast_tick else 1000, self.tick)
 
     def speak(self, now):
-        """开考、剩 15 分钟、结束各播报一次；晚了 90 秒以上（比如刚开机）就不补了"""
+        """开考、剩 15 分钟、结束各播报一次；晚了 90 秒以上（比如刚开机）就不补了。
+        若本场配置了听力且正在播报或处于听力时间窗口内，自动屏蔽普通"考试开始"与"剩 15 分钟"语音防冲突"""
         ex = self.ex
+        au = ex.get("audio")
+        snap = self.app.audio_player.snapshot()
         moments = [("start", ex["start_ts"]), ("end", ex["end_ts"])]
         if ex["end_ts"] - ex["start_ts"] > 20 * 60:
             moments.append(("warn", ex["end_ts"] - 15 * 60))
@@ -2174,17 +3478,329 @@ class ExamBoard:
             k = (ex["key"], name)
             if at <= now < at + 90 and k not in self.app.exam_played:
                 self.app.exam_played.add(k)
+                if name == "start" and (au or snap["state"] in ("playing", "paused", "testing")):
+                    a_s = au["start_ts"] if au else at
+                    a_e = a_s + max(60, float((au or {}).get("duration") or 0)) + 15
+                    pend_near = self.pending_play_at is not None and abs(self.pending_play_at - at) <= 15
+                    if (au and a_s - 10 <= at <= a_e) or pend_near or snap["state"] in ("playing", "paused", "testing"):
+                        log(f"考试听力期间屏蔽普通开考语音：{ex['subject']}")
+                        continue
+                if name == "warn" and snap["state"] == "playing":
+                    log(f"听力播放期间屏蔽剩 15 分钟语音（大屏文字照常变红提醒）：{ex['subject']}")
+                    continue
                 self.expand()  # 收起了的话，播报时自动回到大屏
                 announce((ex.get("voice") or {}).get(name), speak=EXAM_SAY[name])
                 log(f"考试播报：{ex['subject']} {EXAM_SAY[name]}")
 
     def close(self):
+        self.test_gen += 1
+        if (self.has_audio() or self.app.audio_player.snapshot()["state"] in ("playing", "paused", "testing", "error", "test_error")
+                or self.last_reported_state in ("playing", "paused", "testing", "error")):
+            self.playing_audio_id = ""
+            self.app.audio_player.stop()
+            report_exam_audio_status({"exam_id": self.ex["exam_id"], "idx": self.ex["idx"],
+                                      "audio_id": (self.ex.get("audio") or {}).get("id", ""), "play_state": "idle", "pos": 0, "dur": 0})
         for w in (self.mini, self.win):
             try:
                 if w:
                     w.destroy()
             except tk.TclError:
                 pass
+
+
+class ListenFloatBar:
+    """平时「课堂 → 播放听力」（及考前提前试音/提前播）悬浮控制条：贴在右下角，支持 4K 等比缩放，不挡 PPT/电子白板，不抢翻页笔焦点"""
+    BG, BORDER, INK_, SOFT, BLUE, GOLD, RED = "#122336", "#2b4f73", "#eaf2fb", "#9fb6cc", "#7cc4ff", "#ffd166", "#ff6b6b"
+
+    def __init__(self, app, info):
+        self.app = app
+        self.info = dict(info)  # {listen_id?, exam_id?, idx?, exam_key?, title, audio_id, duration, sha256, ext, url}
+        self.confirm_act = None
+        self.pending_play_at = None
+        self.last_sig = None
+        self.done_at = None
+        self.fail_msg = ""
+        self.last_report_at = 0.0
+        self.last_reported_state = None
+        self.last_reported_err = ""
+        self.test_gen = 0
+        self._ticking = False
+        sw, sh = app.sw, app.sh
+        self.s = s = max(1.0, sh / 1080.0)  # 1080p=1.0, 4K=2.0 等比放大
+        self.w = int(min(sw * 0.48, max(480 * s, 560 * s)))
+        self.h = int(round(142 * s))
+        self.win = tk.Toplevel(app.root)
+        self.win.overrideredirect(True)
+        self.win.attributes("-topmost", True)
+        self.win.geometry(f"{self.w}x{self.h}+{sw - self.w - int(24 * s)}+{sh - self.h - int(72 * s)}")
+        float_window(self.win)
+        self.cv = tk.Canvas(self.win, width=self.w, height=self.h, bg=self.BG, highlightthickness=0)
+        self.cv.pack()
+        for act in ("pause_resume", "replay", "stop", "close"):
+            tag = f"lf_{act}"
+            self.cv.tag_bind(tag, "<Button-1>", lambda e, a=act: self._click(a))
+            self.cv.tag_bind(tag, "<Enter>", lambda e: self.cv.config(cursor="hand2"))
+            self.cv.tag_bind(tag, "<Leave>", lambda e: self.cv.config(cursor=""))
+        app.fade_in(self.win)
+
+    def start_tick(self):
+        if not self._ticking:
+            self._ticking = True
+            self.tick()
+
+    def lift(self):
+        try:
+            self.win.attributes("-topmost", True)
+            self.win.lift()
+        except tk.TclError:
+            pass
+
+    def _report_payload(self, play_state, pos=0, dur=0, play_err=""):
+        lid = self.info.get("listen_id")
+        eid = self.info.get("exam_id")
+        idx = self.info.get("idx")
+        out = None
+        if lid is not None:
+            out = {"listen_id": lid, "audio_id": self.info.get("audio_id", ""), "play_state": play_state, "pos": pos, "dur": dur}
+        elif eid is not None and idx is not None:
+            out = {"exam_id": eid, "idx": idx, "audio_id": self.info.get("audio_id", ""), "play_state": play_state, "pos": pos, "dur": dur}
+        if out and play_err:
+            out["play_err"] = play_err
+        return out
+
+    def ensure_cached(self):
+        aid = self.info.get("audio_id") or ""
+        sha = self.info.get("sha256") or ""
+        if not aid:
+            return None
+        path = self.app.audio_cache.get_ready_path(aid, sha)
+        if path:
+            return path
+        self.app.audio_cache.request_now({"id": aid, "ext": self.info.get("ext", "mp3"),
+                                          "sha256": sha, "url": self.info.get("url") or f"/exam-audio/{aid}",
+                                          "name": self.info.get("title", aid)})
+        return None
+
+    def start_play(self, seek=0.0, start_at=None):
+        self.done_at = None
+        self.fail_msg = ""
+        self.pending_play_at = None
+        self.confirm_act = None
+        self.test_gen += 1
+        path = self.ensure_cached()
+        if path:
+            self.app.audio_player.play_file(path, float(self.info.get("duration") or 0), seek=seek, mode="exam")
+            return
+        self.pending_play_at = float(start_at) if start_at else (time.time() + self.app.offset)
+
+    def start_test(self):
+        self.done_at = None
+        self.fail_msg = ""
+        self.pending_play_at = None
+        self.confirm_act = None
+        self.test_gen += 1
+        tgen, sgen = self.test_gen, self.app.session_gen
+
+        def run():
+            p = self.app.audio_cache.fetch_test_audio()
+
+            def fire():
+                if not self.win.winfo_exists() or sgen != self.app.session_gen or tgen != self.test_gen:
+                    return
+                if self.app.listen_bar is not self:
+                    return
+                if not p:
+                    self.fail_msg = "试音下载失败"
+                    self.done_at = time.time()
+                    self.last_sig = None
+                    self.draw()
+                    return
+                cur = self.app.audio_player.snapshot()
+                if cur["state"] in ("playing", "paused") and cur["mode"] == "exam":
+                    return
+                self.app.audio_player.play_file(p, 10.0, 0.0, mode="test")
+            self.app.root.after(0, fire)
+        threading.Thread(target=run, daemon=True).start()
+
+    def _btn(self, x1, y1, x2, y2, text, act, bg="#1b344e", outline="#32577c", fg="#b7cee3"):
+        tag = f"lf_{act}"
+        round_rect(self.cv, x1, y1, x2, y2, 9 * self.s, fill=bg, outline=outline, width=1.5, tags=tag)
+        self.cv.create_text((x1 + x2) / 2, (y1 + y2) / 2, text=text, fill=fg, font=self.app.font(int(15 * self.s), True), tags=tag)
+
+    def _click(self, act):
+        now = time.time()
+        snap = self.app.audio_player.snapshot()
+        if act == "pause_resume":
+            self.confirm_act = None
+            if snap["state"] == "playing":
+                self.app.audio_player.pause()
+            elif snap["state"] == "paused":
+                self.app.audio_player.resume()
+        elif act == "close":
+            self.app.close_listen_bar()
+            return
+        elif act in ("replay", "stop"):
+            if self.confirm_act and self.confirm_act[0] == act and now < self.confirm_act[1]:
+                self.confirm_act = None
+                if act == "replay":
+                    self.start_play(0.0)
+                else:
+                    self.app.close_listen_bar()
+                    return
+            else:
+                self.confirm_act = (act, now + 4.0)
+        self.last_sig = None
+        self.draw()
+
+    def draw(self):
+        snap = self.app.audio_player.snapshot()
+        st, pos, dur = snap["state"], snap["pos"], snap["dur"] or float(self.info.get("duration") or 0)
+        if self.confirm_act and time.time() >= self.confirm_act[1]:
+            self.confirm_act = None
+        cact = self.confirm_act[0] if self.confirm_act else ""
+        waiting = self.pending_play_at is not None
+        err_txt = snap.get("err", "") if st in ("error", "test_error") else (self.fail_msg if st == "idle" and self.fail_msg else "")
+        show_err = (st in ("error", "test_error")) or bool(err_txt)
+        sig = (st, int(pos), int(dur), cact, waiting, self.info.get("title"), err_txt)
+        if sig == self.last_sig:
+            return
+        self.last_sig = sig
+        cv, w, h, s, app = self.cv, self.w, self.h, self.s, self.app
+        cv.config(cursor="")
+        cv.delete("all")
+        bcol = self.RED if show_err else self.GOLD if st == "paused" else self.BLUE if st == "testing" else self.BORDER
+        cv.create_rectangle(1, 1, w - 2, h - 2, outline=bcol, width=max(2, int(2 * s)))
+        cv.create_rectangle(0, 0, int(7 * s), h, fill=self.RED if show_err else self.GOLD if st == "paused" else self.BLUE, width=0)
+
+        pad = int(22 * s)
+        title_f = app.font(int(18 * s), True)
+        st_lbl = ("试音中" if st == "testing" else "试音结束" if st == "test_done" else "试音失败" if st == "test_error"
+                  else "已暂停" if st == "paused" else "已播完" if st == "done" else "播放失败" if show_err
+                  else "准备中…" if waiting else "等待中" if st == "idle" else "播放中")
+        tm_txt = (f"剩余 {max(0, int(10 - pos + 0.999))} 秒" if st == "testing"
+                  else (err_txt[:14] if show_err and err_txt else f"{fmt_mmss(pos)} / {fmt_mmss(dur)}"))
+        tm_f = app.font(int(16 * s), True, digits=True)
+        tw = tm_f.measure(tm_txt)
+        title = ellipsis(f"● {self.info.get('title') or '课堂听力'} · {st_lbl}", title_f, w - pad * 2 - tw - int(16 * s))
+        cv.create_text(pad, int(28 * s), text=title, anchor="w",
+                       fill=self.RED if show_err else self.GOLD if st == "paused" else self.INK_, font=title_f)
+        cv.create_text(w - pad, int(28 * s), text=tm_txt, anchor="e",
+                       fill=self.RED if show_err else self.GOLD if st == "paused" else "#cfe0f0", font=tm_f)
+
+        # 进度条
+        by = int(56 * s)
+        bh_bar = int(10 * s)
+        round_rect(cv, pad, by, w - pad, by + bh_bar, bh_bar / 2, fill="#1e3752", width=0)
+        total = 10.0 if st == "testing" else max(1.0, dur)
+        frac = 0.0 if st in ("idle", "error", "test_error") else (min(1.0, max(0.02, pos / total)) if not waiting else 0.08)
+        if frac > 0:
+            round_rect(cv, pad, by, pad + (w - pad * 2) * frac, by + bh_bar, bh_bar / 2,
+                       fill=self.GOLD if st == "paused" else self.BLUE, width=0)
+
+        # 底部触控按钮（纯中文标签，按缩放倍率自适应尺寸；仅具备定位能力时显示暂停/继续）
+        y1, y2 = h - int(48 * s), h - int(12 * s)
+        x = pad
+        btn_f = app.font(int(15 * s), True)
+        if st in ("playing", "paused"):
+            can_sk = self.app.audio_player.can_seek()
+            if can_sk:
+                lbl = "继续" if st == "paused" else "暂停"
+                bw = btn_f.measure(lbl) + int(34 * s)
+                self._btn(x, y1, x + bw, y2, lbl, "pause_resume",
+                          bg="#3b321d" if st == "paused" else "#1b344e",
+                          outline=self.GOLD if st == "paused" else "#32577c",
+                          fg=self.GOLD if st == "paused" else "#b7cee3")
+                x += bw + int(10 * s)
+            rlbl = "再点确认重播" if cact == "replay" else "重播"
+            rw = btn_f.measure(rlbl) + int(32 * s)
+            self._btn(x, y1, x + rw, y2, rlbl, "replay",
+                      bg="#3b321d" if cact == "replay" else "#1b344e",
+                      outline=self.GOLD if cact == "replay" else "#32577c",
+                      fg=self.GOLD if cact == "replay" else "#b7cee3")
+            x += rw + int(10 * s)
+            slbl = "再点确认停止" if cact == "stop" else "停止"
+            sw_ = btn_f.measure(slbl) + int(32 * s)
+            self._btn(x, y1, x + sw_, y2, slbl, "stop",
+                      bg="#3d2229" if cact == "stop" else "#1b344e",
+                      outline=self.RED if cact == "stop" else "#32577c",
+                      fg="#ffc2c2" if cact == "stop" else "#b7cee3")
+            cv.create_text(w - pad, (y1 + y2) / 2, text="不挡课件" if can_sk else "仅重播/停止", anchor="e", fill="#6483a3", font=app.font(int(13 * s)))
+        elif st == "testing":
+            bw = btn_f.measure("结束试音") + int(32 * s)
+            self._btn(x, y1, x + bw, y2, "结束试音", "close")
+        else:
+            if self.info.get("audio_id"):
+                rlbl = "再点确认重播" if cact == "replay" else "重播"
+                rw = btn_f.measure(rlbl) + int(32 * s)
+                self._btn(x, y1, x + rw, y2, rlbl, "replay")
+            cw = btn_f.measure("收起") + int(32 * s)
+            self._btn(w - pad - cw, y1, w - pad, y2, "收起", "close")
+
+    def tick(self):
+        if not self.win.winfo_exists():
+            # 若被一体机“一键清屏”外部关掉，清理引用并停播，防止音频失控及锁死自动更新
+            if self.app.listen_bar is self:
+                self.app.close_listen_bar()
+            return
+        now = time.time() + self.app.offset
+        if self.pending_play_at is not None and now >= self.pending_play_at:
+            dur = float(self.info.get("duration") or 0)
+            lag = now - self.pending_play_at
+            if lag > 90.0 or (dur > 0 and lag >= dur):
+                log(f"课堂听力等待下载超时（{lag:.0f}s），已放弃")
+                self.pending_play_at = None
+                self.fail_msg = "音频下载超时"
+                if self.done_at is None:
+                    self.done_at = time.time()
+            else:
+                # 等待期间只查本地缓存，不反复调用 request_now 刷后台下载队列
+                p = self.app.audio_cache.get_ready_path(self.info.get("audio_id") or "", self.info.get("sha256") or "")
+                if p:
+                    self.pending_play_at = None
+                    self.fail_msg = ""
+                    self.app.audio_player.play_file(p, dur, seek=max(0.0, lag), mode="exam")
+        snap = self.app.audio_player.snapshot()
+        raw_st = snap["state"]
+        rep_st = ("idle" if raw_st == "test_done"
+                  else "error" if (raw_st in ("error", "test_error") or (raw_st == "idle" and self.fail_msg))
+                  else (raw_st if raw_st in ("idle", "playing", "paused", "done", "testing") else "idle"))
+        rep_err = (snap.get("err") or self.fail_msg or "") if rep_st == "error" else ""
+        if (rep_st != self.last_reported_state or rep_err != getattr(self, "last_reported_err", "")
+                or (rep_st in ("playing", "paused", "testing") and time.time() - self.last_report_at >= 3.0)):
+            pl = self._report_payload(rep_st, snap["pos"], snap["dur"] or self.info.get("duration", 0), play_err=rep_err)
+            if pl:
+                self.last_reported_state = rep_st
+                self.last_reported_err = rep_err
+                self.last_report_at = time.time()
+                report_exam_audio_status(pl)
+        if raw_st in ("done", "test_done") or (raw_st == "idle" and self.fail_msg):
+            wait_sec = 1.5 if raw_st == "test_done" else 8.0
+            if self.done_at is None:
+                self.done_at = time.time()
+            elif time.time() - self.done_at >= wait_sec:
+                self.app.close_listen_bar()
+                return
+        self.draw()
+        self.win.after(450, self.tick)
+
+    def detach_without_stop(self):
+        """无缝移交控制权给即将打开的 ExamBoard：只关闭浮窗，绝不掐断音频"""
+        self.test_gen += 1
+        try:
+            self.win.destroy()
+        except tk.TclError:
+            pass
+
+    def close(self):
+        self.test_gen += 1
+        self.app.audio_player.stop()
+        pl = self._report_payload("idle", 0, 0)
+        if pl:
+            report_exam_audio_status(pl)
+        try:
+            self.win.destroy()
+        except tk.TclError:
+            pass
 
 
 # ---------------- 主程序 ----------------
@@ -2621,7 +4237,15 @@ class App:
         self.shooting = False  # 正在截图、上传（要一两秒，别重复截）
         self.morning_dismissed = None
         self.exam, self.exam_played, self.exam_rev, self.awake_at = None, set(), None, 0  # 考试大屏、已播报过的提示、考试安排的版本
+        self.audio_cache = ExamAudioCache()
+        self.audio_player = ExamAudioPlayer()
+        self.listen_bar = None
+        self.listen_fired = set()  # 已按定时自动播过的平时听力 (id, date, play_at)
+        self.audio_cmds_done = set()
         self.handled = set()
+        self.pending_uninstall_id = None
+        self._uninstall_ack_inflight = None
+        self.board_gen = 0
         self.pending_restart = False
         self.auto_mode = AUTO_MODE
         self.bound = bool(CLASS and KEY)
@@ -2706,13 +4330,31 @@ class App:
                 fails = 0
                 time.sleep(1)
                 continue
-            gen, url = self.session_gen, POLL_URL
+            gen, url, ack_url = self.session_gen, POLL_URL, ACK_URL
             try:
                 data = fetch_json(url)
                 if fails:
                     log("已重新连接服务器")
                 fails = 0
                 if data.get("rebind") and self.auto_mode:
+                    if gen != self.session_gen:
+                        time.sleep(1)
+                        continue
+                    p_uid = getattr(self, "pending_uninstall_id", None)
+                    if p_uid:
+                        if getattr(self, "_uninstall_ack_inflight", None) is not None:
+                            time.sleep(1)
+                            continue
+                        # 上一次卸载回执可能已到服务端并解绑 MAC（只是响应丢包），先用本会话快照的 ack_url 幂等复核
+                        ares = send_ack_sync(p_uid, ack_url=ack_url)
+                        if ares == "acked":
+                            self.inbox.put(("uninstall_ack_result", (gen, p_uid, "acked")))
+                            time.sleep(1)
+                            continue
+                        if ares == "failed":
+                            time.sleep(2)
+                            continue
+                        self.inbox.put(("uninstall_ack_result", (gen, p_uid, "cancelled")))
                     self.inbox.put(("rebind", (gen, "服务器已解除本机绑定")))
                     time.sleep(1)
                     continue
@@ -2831,6 +4473,13 @@ class App:
 
     def deactivate_class(self, reason=""):
         self.session_gen += 1
+        # 先收起考试大屏和听力浮条，确保最后一次 play_state="idle" 上报时仍保留原班级的 URL/密钥
+        if self.exam:
+            self.exam.close()
+            self.exam = None
+            self.x11.allow_sleep()
+        self.close_listen_bar()
+        self.audio_player.stop()
         set_binding("", "", "")
         self.bound = False
         self.board = {}
@@ -2844,10 +4493,13 @@ class App:
         if self.deskb:
             self.deskb.close()
             self.deskb = None
-        if self.exam:
-            self.exam.close()
-            self.exam = None
-            self.x11.allow_sleep()
+        self.audio_cache.reset()
+        self.listen_fired.clear()
+        self.audio_cmds_done.clear()
+        self.exam_played.clear()
+        self.pending_uninstall_id = None
+        self._uninstall_ack_inflight = None
+        self.board_gen = 0
         if self.tooltab:
             self.tooltab.destroy()
             self.tooltab = None
@@ -2941,6 +4593,13 @@ class App:
                     gen, reason = data
                     if gen == self.session_gen and self.bound:
                         self.deactivate_class(reason)
+                elif kind == "uninstall_ack_result":
+                    gen, uid_, res = data
+                    if getattr(self, "_uninstall_ack_inflight", None) == uid_:
+                        self._uninstall_ack_inflight = None
+                    if gen == self.session_gen and self.bound:
+                        if self.handle_uninstall_ack_result(uid_, res) == "acked":
+                            return
                 elif kind == "device_check":
                     if self.bound:
                         continue
@@ -2977,7 +4636,17 @@ class App:
                     gen, payload = data if isinstance(data, tuple) else (self.session_gen, data)
                     if gen != self.session_gen or not self.bound:
                         continue
+                    old_st = (self.board or {}).get("server_time") or 0
+                    new_st = (payload or {}).get("server_time") or 0
+                    if old_st and new_st and new_st < old_st:
+                        continue  # 丢弃乱序晚到的旧看板，防止覆盖已更新的新录音
                     self.board = payload
+                    self.board_gen = getattr(self, "board_gen", 0) + 1
+                    self.audio_cache.sync(payload.get("exam_audio_prefetch") or [])
+                    if self.listen_bar and self.listen_bar.info.get("listen_id") is not None:
+                        alive_lids = {t.get("id") for t in (payload.get("listen_tasks") or [])}
+                        if self.listen_bar.info["listen_id"] not in alive_lids:
+                            self.close_listen_bar()
                     key = payload.get("screen_font") or "misans"
                     want = self.family_fallback
                     if key in SCREEN_FONTS:
@@ -2991,7 +4660,25 @@ class App:
                         self.family, self.fonts = want, {}
         except queue.Empty:
             pass
-        if self.pending_restart and not self.cards and not self.exam and not self.bind_win:  # 考试、选班时不重启
+        # 根窗口主循环巡检死窗口：即便外部“一键清屏”直接销毁考试窗或听力浮条，0.2 秒内立刻停播音频、上报空闲并解除更新锁
+        if self.exam and not self.exam.win.winfo_exists():
+            log("检测到考试大屏被外部关闭，已自动停播并清理")
+            self.exam.close()
+            self.exam = None
+            self.x11.allow_sleep()
+        if self.listen_bar and not self.listen_bar.win.winfo_exists():
+            log("检测到课堂听力浮条被外部关闭，已自动停播并清理")
+            self.close_listen_bar()
+        if self.bound and not self.exam:
+            try:
+                self.check_listen_schedule()
+            except Exception as e:
+                log(f"平时听力调度出错：{e}")
+        pstate = self.audio_player.snapshot()["state"]
+        if (self.pending_restart and not self.cards and not self.exam and not self.listen_bar and not self.bind_win
+                and not getattr(self, "pending_uninstall_id", None) and getattr(self, "_uninstall_ack_inflight", None) is None
+                and pstate not in ("playing", "paused", "testing")):  # 考试、放听力、选班、待确认卸载时不重启
+            self.audio_player.stop()
             log("重启以加载新版本 / 新字体")
             if WIN:  # Windows 的 execv 是另起一个进程：先放开"只运行一个"的锁，再启动新进程、退出自己
                 MUTEX[1].CloseHandle(MUTEX[0])
@@ -3000,12 +4687,61 @@ class App:
             os.execv(sys.executable, [sys.executable, SELF, "--restarted"])
         self.root.after(200, self.process)
 
+    def handle_uninstall_ack_result(self, mid, res):
+        """主线程处理后台卸载回执结果：仅当服务端明确返回 acked 时才停播并自删；cancelled 放弃卸载；failed 保留待重试"""
+        if getattr(self, "_uninstall_ack_inflight", None) == mid:
+            self._uninstall_ack_inflight = None
+        if res == "acked":
+            self.pending_uninstall_id = None
+            self.audio_player.stop()
+            uninstall_self()
+            return "acked"
+        if res == "cancelled":
+            if getattr(self, "pending_uninstall_id", None) == mid:
+                self.pending_uninstall_id = None
+            log(f"远程卸载 #{mid} 已被撤销或失效，取消卸载并继续运行")
+            return "cancelled"
+        if getattr(self, "pending_uninstall_id", None) in (None, mid):
+            self.pending_uninstall_id = mid
+        log(f"远程卸载 #{mid} 回执失败，保留接收端等待下次轮询重试确认")
+        return "failed"
+
+    def schedule_uninstall_ack(self, mid):
+        """将卸载回执移至后台线程单飞执行（同时仅允许一个在途请求），绝不阻塞界面主线程与死窗口巡检"""
+        if not mid:
+            return False
+        self.pending_uninstall_id = mid
+        if getattr(self, "_uninstall_ack_inflight", None) is not None:
+            return False
+        self._uninstall_ack_inflight = mid
+        gen = getattr(self, "session_gen", 0)
+        ack_url = ACK_URL
+        inbox = getattr(self, "inbox", None)
+
+        def run():
+            res = "failed"
+            try:
+                res = send_ack_sync(mid, ack_url=ack_url)
+            except Exception as e:
+                log(f"后台卸载确认异常：{e}")
+            if inbox is not None:
+                inbox.put(("uninstall_ack_result", (gen, mid, res)))
+            else:
+                self._uninstall_ack_inflight = None
+
+        threading.Thread(target=run, daemon=True).start()
+        return True
+
     def apply(self, data):
         if data.get("server_time"):
             self.offset = data["server_time"] - time.time()
+        p_uid = getattr(self, "pending_uninstall_id", None)
+        if p_uid and not any(m.get("kind") == "uninstall" and m.get("id") == p_uid for m in (data.get("messages") or [])):
+            # 前一次回执可能已落库但响应丢包，导致轮询不再返回该卸载指令：后台单飞重试确认
+            self.schedule_uninstall_ack(p_uid)
         rev = data.get("exam_rev")
         if rev and rev != self.exam_rev:  # 老师改了考试安排（或提前结束）：马上重新拉看板
-            if self.exam_rev is not None:
+            if self.exam_rev is not None or self.board:
                 threading.Thread(target=self.fetch_board_now, daemon=True).start()
             self.exam_rev = rev
         self.in_class = bool(data.get("in_class"))
@@ -3020,8 +4756,18 @@ class App:
             threading.Thread(target=run, daemon=True).start()
         active = set()
         for m in data.get("messages") or []:
-            if m.get("kind") == "uninstall":  # 班主任在工作台点了"远程卸载"
-                uninstall_self()
+            if m.get("kind") == "uninstall":  # 班主任/管理员在工作台点了"远程卸载"
+                # 移到后台线程单飞确认，绝不阻塞主线程；主线程收到 acked 结果后再停播并自删
+                self.schedule_uninstall_ack(m.get("id"))
+                continue
+            if m.get("kind") == "exam_audio":  # 考试或平时听力控制指令（试音 / 立即同步播放 / 停止）
+                d = m.get("data") or {}
+                cid = d.get("cmd_id") or m["id"]
+                send_ack(m["id"])  # 可靠回执（若回执丢包导致服务端重发，cmd_id 保证只执行一次并补回执）
+                if cid not in self.audio_cmds_done:
+                    self.audio_cmds_done.add(cid)
+                    self.handle_audio_cmd(d)
+                continue
             if m.get("kind") == "standby":  # 老师在工作台点了"在大屏显示看板"
                 if m["id"] not in self.handled:
                     self.handled.add(m["id"])
@@ -3037,6 +4783,86 @@ class App:
                 self.close(mid)
         for card in self.cards.values():  # 保持在最前面（例如正在放 PPT）
             card.lift()
+        if self.listen_bar:
+            self.listen_bar.lift()
+
+    def close_listen_bar(self):
+        if self.listen_bar:
+            self.listen_bar.close()
+            self.listen_bar = None
+
+    def open_listen_bar(self, info, action="play", start_at=None):
+        self.close_listen_bar()
+        self.listen_bar = ListenFloatBar(self, info)
+        if action == "test":
+            self.listen_bar.start_test()
+        else:
+            now = time.time() + self.offset
+            self.listen_bar.ensure_cached()  # 无论是否延后起播，立即唤醒优先下载
+            if start_at and start_at > now:
+                self.listen_bar.pending_play_at = start_at
+            else:
+                self.listen_bar.start_play(seek=max(0.0, now - start_at) if start_at else 0.0, start_at=start_at)
+        self.listen_bar.start_tick()
+
+    def handle_audio_cmd(self, d):
+        act = d.get("action")
+        if d.get("mode") == "listen":
+            if act == "stop":
+                self.close_listen_bar()
+                return
+            if self.exam:  # 正在正式考试期间不弹出平时听力浮条
+                return
+            self.open_listen_bar(d, action=act, start_at=d.get("start_at"))
+            return
+        # 考试听力控制指令
+        if self.exam:
+            # 正在正式考试大屏中：仅响应本场考试指令，绝不被其他场次的停止/开播指令误伤或叠弹浮条
+            if not d.get("exam_key") or self.exam.ex.get("key") == d.get("exam_key"):
+                self.exam.handle_cmd(d)
+            return
+        if act == "stop":
+            self.audio_player.stop()
+            self.close_listen_bar()
+            return
+        # 若考试尚未到自动显示时间（如提前半小时试音或临时开播），借用悬浮播放条完成试音/播放，并带全元数据与 exam_id/idx 供上报和无缝移交
+        ex = next((x for x in self.board.get("exams") or [] if x.get("key") == d.get("exam_key")), None)
+        au = (ex or {}).get("audio") or {}
+        info = {
+            "exam_key": d.get("exam_key") or (ex or {}).get("key", ""),
+            "exam_id": d.get("exam_id") if d.get("exam_id") is not None else (ex or {}).get("exam_id"),
+            "idx": d.get("idx") if d.get("idx") is not None else (ex or {}).get("idx"),
+            "title": d.get("title") or f"{(ex or {}).get('subject') or '考试'}听力",
+            "audio_id": d.get("audio_id") or au.get("id", ""),
+            "duration": d.get("duration") or au.get("duration", 0),
+            "sha256": d.get("sha256") or au.get("sha256", ""),
+            "ext": d.get("ext") or au.get("ext", "mp3"),
+            "url": d.get("url") or au.get("url", ""),
+        }
+        self.open_listen_bar(info, action=act, start_at=d.get("start_at"))
+
+    def check_listen_schedule(self):
+        """检查平时定时听力：到设定时间自动弹出右下角悬浮播放条并同步起播（误差 < 1 秒）"""
+        if self.exam:
+            return
+        now = time.time() + self.offset
+        for t in self.board.get("listen_tasks") or []:
+            pts = t.get("play_ts")
+            if not pts or not (pts <= now < pts + 90):
+                continue
+            key = (t["id"], t["date"], t.get("play_at"))
+            if key in self.listen_fired:
+                continue
+            au = t.get("audio") or {}
+            if not au.get("id"):
+                continue
+            self.listen_fired.add(key)
+            info = {"listen_id": t["id"], "title": t.get("title") or "英语听力", "audio_id": au["id"],
+                    "duration": au.get("duration", 0), "sha256": au.get("sha256", ""), "ext": au.get("ext", "mp3"),
+                    "url": au.get("url", "")}
+            self.open_listen_bar(info, action="play", start_at=pts)
+            log(f"定时平时听力开播：{info['title']}")
+            break
 
     def show(self, m):
         self.hide_standby()
@@ -3051,7 +4877,8 @@ class App:
         self.cards[m["id"]] = card
         self.relayout()
         if m.get("voice") and kind not in ("timer", "pick"):
-            announce(m.get("audio"), speak=m.get("speak"))
+            if self.audio_player.snapshot()["state"] not in ("playing", "testing"):
+                announce(m.get("audio"), speak=m.get("speak"))
         log(f"收到消息 #{m['id']}（{kind}）：{m['text']}")
 
     def relayout(self):
@@ -3091,7 +4918,7 @@ class App:
             elif self.morning.key[3] != tuple((i["subject"], i["content"]) for i in mo.get("items") or []):
                 self.hide_morning()  # 老师刚改了早读内容：重画
                 self.morning = MorningBoard(self, mo)
-        elif active and self.morning_dismissed != key and not self.cards:
+        elif active and self.morning_dismissed != key and not self.cards and not self.listen_bar:
             self.hide_standby()
             self.morning = MorningBoard(self, mo)
             log("显示早读页")
@@ -3107,19 +4934,76 @@ class App:
             self.morning = None
 
     def check_exam(self):
-        """按服务器时间找现在要显示的那场考试（开考前 15 分钟到结束后 5 分钟）"""
+        """按服务器时间找现在要显示的那场考试（正在进行 > 下一场即将/已到听力起播 > 前场考后收卷页 > 普通考前等待页）"""
         now = time.time() + self.offset
-        ex = next((x for x in self.board.get("exams") or [] if x["show_from"] <= now < x["hide_at"]), None)
-        if self.exam and (not ex or self.exam.key != exam_key(ex)):  # 收起，或者老师改了这场考试：重画
+        cands = [x for x in self.board.get("exams") or [] if x["show_from"] <= now < x["hide_at"]]
+        def _ex_prio(x):
+            if x["start_ts"] <= now < x["end_ts"]:
+                return (0, x["start_ts"])
+            au = x.get("audio") or {}
+            if now < x["end_ts"] and au.get("id") and au.get("start_ts") is not None and now >= au["start_ts"] - 120:
+                return (1, au["start_ts"])  # 下场听力起播前 2 分钟起优先接管，绝不被前场 5 分钟结束页挡住漏播
+            if now >= x["end_ts"]:
+                return (2, x["end_ts"])
+            return (3, x["start_ts"])
+        ex = min(cands, key=_ex_prio) if cands else None
+        if self.exam:
+            if ex and self.exam.ex.get("key") == ex.get("key"):
+                cur_bgen = getattr(self, "board_gen", 0)
+                if self.exam.key != exam_key(ex) and getattr(self.exam, "_last_board_gen", -1) != cur_bgen:  # 仅在收到新代次看板且有改动时刷新，防旧看板反复触发重绘
+                    self.exam.update_exam(ex)
+                return
+            if now >= self.exam.ex.get("end_ts", float("inf")) and hasattr(self.exam, "speak"):
+                self.exam.speak(now)  # 连场无缝切换前，先确保前一场“考试结束，请停止作答”播报触发
             self.exam.close()
             self.exam = None
             if not ex:
                 log("考试大屏收起")
                 self.x11.allow_sleep()
         if ex and not self.exam:
+            adopt = None
+            if self.listen_bar and self.listen_bar.info.get("exam_key") == ex.get("key"):
+                # 提前开播借用的浮条正是本场考试：仅当浮条处于正式播放/暂停/待播时移交音频元数据，避免“只试音”浮条把新曲顶回旧曲
+                st_cur = self.audio_player.snapshot()["state"]
+                lb_info = self.listen_bar.info or {}
+                lb_aid = str(lb_info.get("audio_id") or "").strip()
+                lb_sha = str(lb_info.get("sha256") or "").strip()
+                cur_au = ex.get("audio") or {}
+                has_pend = self.listen_bar.pending_play_at is not None
+                active_play = st_cur in ("playing", "paused") or has_pend
+                adopt_au = None
+                if active_play and lb_aid:
+                    if cur_au.get("id") == lb_aid and (not lb_sha or cur_au.get("sha256") == lb_sha):
+                        adopt_au = dict(cur_au)  # 即使 ID 已一致也武装 _cmd_audio，防乱序旧看板回退
+                    else:
+                        adopt_au = {
+                            "id": lb_aid,
+                            "name": lb_info.get("title") or f"{ex.get('subject') or '考试'}听力",
+                            "ext": lb_info.get("ext") or "mp3",
+                            "size": int(lb_info.get("size") or 0),
+                            "sha256": lb_sha,
+                            "duration": float(lb_info.get("duration") or 0),
+                            "start": cur_au.get("start") or ex.get("start", ""),
+                            "start_ts": cur_au.get("start_ts") if cur_au.get("start_ts") is not None else (self.listen_bar.pending_play_at or ex.get("start_ts")),
+                            "url": lb_info.get("url") or f"/exam-audio/{lb_aid}",
+                        }
+                        if hasattr(self, "fetch_board_now"):
+                            threading.Thread(target=self.fetch_board_now, daemon=True).start()
+                adopt = {
+                    "audio_auto_done": active_play,
+                    "pending_play_at": self.listen_bar.pending_play_at,
+                    "pending_audio_id": lb_aid if has_pend else "",
+                    "pending_audio_sha": lb_sha if has_pend else "",
+                    "audio": adopt_au,
+                    "playing_audio_id": lb_aid if st_cur in ("playing", "paused") else "",
+                }
+                self.listen_bar.detach_without_stop()
+                self.listen_bar = None
+            else:
+                self.close_listen_bar()
             self.hide_morning()
             self.hide_standby()
-            self.exam = ExamBoard(self, ex)
+            self.exam = ExamBoard(self, ex, adopt=adopt)
             for card in self.cards.values():  # 紧急消息照常显示在最前面
                 card.lift()
             log(f"显示考试大屏：{ex['subject']} {ex['start']}–{ex['end']}")
@@ -3179,6 +5063,10 @@ class App:
             self.check_morning()
         except Exception as e:
             log(f"早读页出错：{e}")
+        if self.listen_bar and self.audio_player.snapshot()["state"] in ("playing", "testing"):
+            if time.time() - self.awake_at > 30:
+                self.awake_at = time.time()
+                self.x11.keep_awake()
         try:
             cfg = self.board.get("standby") or {}
             idle = self.x11.idle_seconds()
@@ -3189,11 +5077,11 @@ class App:
             elif self.standby:
                 shown_for = time.time() - self.standby_at
                 touched = self.x11.ok and idle < max(2, shown_for - 3)  # 显示之后有人碰过屏幕
-                if (touched and shown_for > 4) or (not window and not self.standby_forced):
+                if (touched and shown_for > 4) or (not window and not self.standby_forced) or self.listen_bar:
                     self.hide_standby()
                 elif board_sig(self.board) != self.standby_sig:  # 显示着的时候老师改了作业、公告、时间安排：重画
                     self.show_standby(forced=self.standby_forced)
-            elif (cfg.get("enabled") and self.x11.ok and not self.cards and window and not self.morning
+            elif (cfg.get("enabled") and self.x11.ok and not self.cards and window and not self.morning and not self.listen_bar
                   and idle >= max(1, cfg.get("idle_minutes", 5)) * 60):
                 self.show_standby()
         except Exception as e:

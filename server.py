@@ -55,6 +55,16 @@ FILE_MAX = 50 * 1024 * 1024
 FILE_KEEP_DAYS = 7
 FILE_TOTAL_MAX = 3 * 1024 ** 3  # 所有文件加起来最多 3GB，防止把硬盘塞满
 FILE_CLASS_MAX = 500 * 1024 ** 2  # 公共服务器上每个班最多 500MB，免得几个班把空间占完
+EXAM_AUDIO_DIR = os.path.join(DATA_DIR, "exam_audio")  # 考试与平时听力音频（多班共享只存一份，7 天自动清理）
+EXAM_AUDIO_PATH = os.path.join(DATA_DIR, "exam_audio.json")
+LISTEN_PATH = os.path.join(DATA_DIR, "listen.json")    # 平时听力播放任务（课堂 -> 播放听力）
+EXAM_AUDIO_EXTS = {"mp3", "wav"}
+EXAM_AUDIO_MAX = 80 * 1024 * 1024  # 单个听力文件上限 80MB
+EXAM_AUDIO_TOTAL_MAX = 2 * 1024 ** 3  # 听力音频总容量上限 2GB
+EXAM_AUDIO_ORPHAN_MAX = 10  # 单账号未绑定任何任务的临时上传文件上限
+EXAM_AUDIO_ORPHAN_TTL = 1800  # 未保存临时上传音频保留 30 分钟
+EXAM_AUDIO_KEEP_DAYS = 7
+EXAM_AUDIO_EARLY_MAX = 15  # 允许听力起播时间早于开考最多 15 分钟（方便播放自带试音段）
 SESSIONS = ["早读", "上午", "下午", "晚自习"]
 ATTEND_TYPES = ["迟到", "请假", "缺勤", "早退"]
 STATIC = os.path.join(BASE, "static")
@@ -380,6 +390,7 @@ CFG = load_config()
 os.makedirs(AUDIO_DIR, exist_ok=True)
 os.makedirs(os.path.join(DATA_DIR, "images"), exist_ok=True)
 os.makedirs(FILE_DIR, exist_ok=True)
+os.makedirs(EXAM_AUDIO_DIR, exist_ok=True)
 lock = threading.Lock()
 messages = read_json(MSG_PATH, [])
 sessions = read_json(SESSION_PATH, {})  # token -> {name, exp}
@@ -393,8 +404,14 @@ settings.setdefault("standby", {"enabled": True, "idle_minutes": 5})
 if settings.get("screen_font") not in ("misans", "wenkai", "system"):
     settings["screen_font"] = "misans"
 files = read_json(FILE_PATH, [])         # 文件：{id, class, name, ext, size, by, uid, at}
-exams = read_json(EXAM_PATH, [])        # 考试：{id, name, classes, sessions: [{subject, date, start, end}], notice, creator, uid, created, ended: {"班级|场次": 时间戳}}
-exam_rev = [time.time()]                 # 考试安排改了就变：一体机轮询时看到变化马上重新拉看板
+exams = read_json(EXAM_PATH, [])        # 考试：{id, name, classes, sessions: [{subject, date, start, end, ...}], notice, creator, uid, created, ended: {"班级|场次": 时间戳}}
+exam_audios = read_json(EXAM_AUDIO_PATH, {})  # audio_id -> {id, name, ext, size, sha256, duration, by, uid, at}
+if not isinstance(exam_audios, dict):
+    exam_audios = {}
+listen_tasks = read_json(LISTEN_PATH, [])  # 平时听力：{id, title, classes, audio_id, date, play_at, creator, uid, created}
+if not isinstance(listen_tasks, list):
+    listen_tasks = []
+exam_rev = [time.time()]                 # 考试/听力安排改了就变：一体机轮询时看到变化马上重新拉看板
 quizzes = read_json(QUIZ_PATH, [])       # 学情：{id, class, title, date, questions: [题号], wrong: {题号: [姓名]}, source}
 attends = read_json(ATTEND_PATH, [])     # 考勤 {id, class, date, session, marks: {姓名: 类型}, ts}
 collects = read_json(COLLECT_PATH, [])   # 作业收交登记 {id, class, date, hw_id, subject, content, missing, ts}
@@ -445,6 +462,10 @@ pick_history = {}                        # 班级 -> 最近被抽到的名字（
 last_seen = {}                           # 班级 -> 最近一次轮询时间
 shots, shot_req = {}, {}                 # 看大屏：班级 -> {img, type, at, err}（只在内存里，2 分钟后作废）；班级 -> 老师点"看一眼"的时间
 file_batches = {}                        # 群发文件预处理：batch_id -> {uid, classes, skipped, name, exp}（只在内存里，5 分钟过期）
+exam_audio_ready = {}                    # audio_id -> {cls: {status, pct, at, err}}（一体机预下载与校验点名状态）
+exam_audio_play = {}                     # "exam_id|idx|cls" -> {state, pos, dur, at, audio_id, err}（一体机当前听力播控状态）
+screen_audio_cap = {}                    # cls -> {can_mp3, can_seek, can_wav, at}（一体机音频播放能力）
+screen_rv = {}                           # cls -> {rv, at}（一体机接收端协议版本，rv>=6 支持可靠回执）
 login_fails = {}                         # ip -> [失败次数, 首次失败时间]
 reg_fails = {}                           # ip -> [注册码输错次数, 首次失败时间]
 reg_counts = {}                          # ip -> [日期, 今天注册次数]
@@ -576,7 +597,42 @@ def make_speech_tc(text, voice=None, repeat=None):
         return None
 
 
+def make_exam_test_audio():
+    """生成 10 秒温和清晰的考前试音音频（data/audio/exam_test.wav）：不泄露真题内容，离线也可用"""
+    path = os.path.join(AUDIO_DIR, "exam_test.wav")
+    if os.path.exists(path):
+        return
+    rate, total_s = 22050, 10.0
+    nframes = int(rate * total_s)
+    frames = [0.0] * nframes
+    # 两轮舒缓清晰的三音节提示音（C5-E5-G5-C6，间隔呼吸），方便监考老师在教室前后排听清并调节音量
+    notes = [
+        (523.25, 0.2, 0.9), (659.25, 1.0, 0.9), (783.99, 1.8, 1.0), (1046.50, 2.7, 1.4),
+        (783.99, 4.6, 0.8), (659.25, 5.4, 0.8), (523.25, 6.2, 0.9), (783.99, 7.2, 1.0), (1046.50, 8.2, 1.5),
+    ]
+    for freq, start, dur in notes:
+        i0 = int(start * rate)
+        cnt = int(dur * rate)
+        for i in range(cnt):
+            idx = i0 + i
+            if idx >= nframes:
+                break
+            t = i / rate
+            attack = min(1.0, t / 0.03)
+            env = attack * math.exp(-2.6 * t)
+            v = env * (math.sin(2 * math.pi * freq * t) + 0.28 * math.sin(4 * math.pi * freq * t)
+                       + 0.08 * math.sin(6 * math.pi * freq * t))
+            frames[idx] += v
+    with wave.open(path + ".tmp", "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"".join(struct.pack("<h", int(max(-1.0, min(1.0, f * 0.42)) * 32767)) for f in frames))
+    os.replace(path + ".tmp", path)
+
+
 make_chime()
+make_exam_test_audio()
 
 
 def now_cn():
@@ -643,10 +699,28 @@ def today_classes(cls, dt=None):
     return out, cur, nxt
 
 
+def is_active_uninstall(m, now=None):
+    """未可靠回执、未撤销、未过期的远程卸载任务（无论是否已通过轮询发出，即 pending 与 delivered 均算待处理）"""
+    if m.get("kind") != "uninstall" or m.get("recalled") or m.get("acked_at"):
+        return False
+    now = now if now is not None else time.time()
+    if m.get("expire_at") and now > m["expire_at"]:
+        return False
+    return msg_status(m, now) in ("pending", "delivered", "scheduled")
+
+
 def save_messages():
-    """每个班各留最近 200 条"""
+    """每个班各留最近 200 条；未完成、未撤回、未过期的远程卸载任务不参与裁剪；
+    已回执 24 小时内或已撤销但未过期的卸载记录也保留宽限期，保证网络抖动重发回执幂等与撤销竞态准确识别"""
+    now = time.time()
     seen, keep = {}, []
     for m in reversed(messages):
+        if m.get("kind") == "uninstall":
+            if (is_active_uninstall(m, now)
+                    or (m.get("acked_at") and now - m["acked_at"] < 86400)
+                    or (m.get("recalled") and m.get("expire_at") and now < m["expire_at"])):
+                keep.append(m)
+                continue
         seen[m["class"]] = seen.get(m["class"], 0) + 1
         if seen[m["class"]] <= 200:
             keep.append(m)
@@ -661,7 +735,7 @@ def msg_status(m, now):
         return "acked"
     if m["deliver_at"] > now:
         return "scheduled"
-    if (m.get("expire_at") and now > m["expire_at"]) or now - m["deliver_at"] > CFG["expire_minutes"] * 60:
+    if (now > m["expire_at"]) if m.get("expire_at") else (now - m["deliver_at"] > CFG["expire_minutes"] * 60):
         return "expired"
     return "delivered" if m.get("delivered_at") else "pending"
 
@@ -674,13 +748,18 @@ def today():
     return now_cn().strftime("%Y-%m-%d")
 
 
+def session_sid(token):
+    """给登录会话生成短指纹（不存明文 token），用来精确区分不同设备的发送者"""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:12] if token else ""
+
+
 def create_messages(classes, text, sender, voice=False, urgent=False, defer=False, voice_name=None,
                     kind="call", data=None, expire_at=None, say=None, repeat=None, who=None, loud=False, send_at=None,
-                    data_by_class=None):
+                    data_by_class=None, sender_uid=None, sender_sid=None):
     """所有推送到教室大屏的内容（喊话、作业、提醒、课堂工具）都走这里；send_at：老师定时发送的时间"""
     now = time.time()
     def deliver_time(cls):  # 上课时间的普通消息，等到这个班下课再送（晚自习不等：值班老师要马上看到）
-        ex = exam_now(cls, send_at or now) if not urgent and kind not in ("uninstall", "standby") else None
+        ex = exam_now(cls, send_at or now) if not urgent and kind not in ("uninstall", "standby", "exam_audio") else None
         if ex:  # 正在考试：普通消息、提醒等考完（结束后 5 分钟）再送；紧急消息照常
             return ex["hide_at"]
         if send_at:  # 定时发送：到点就送，上课时一体机照常只在角落显示
@@ -700,7 +779,8 @@ def create_messages(classes, text, sender, voice=False, urgent=False, defer=Fals
                 continue  # 考试时不提醒"下节课带什么"
             at = deliver_time(cls)
             deliver_at = max(deliver_at, at)
-            messages.append({"id": nid, "class": cls, "text": text, "sender": sender, "kind": kind,
+            messages.append({"id": nid, "class": cls, "text": text, "sender": sender,
+                             "sender_uid": sender_uid or "", "sender_sid": sender_sid or "", "kind": kind,
                              "data": data_by_class[cls] if data_by_class else data, "voice": bool(voice), "urgent": bool(urgent), "audio": audio,
                              "created": now, "deliver_at": at, "expire_at": expire_at,
                              "delivered_at": None, "acked_at": None, "who": who, "loud": bool(loud and voice), "send_at": send_at,
@@ -711,6 +791,18 @@ def create_messages(classes, text, sender, voice=False, urgent=False, defer=Fals
             nid += 1
         save_messages()
     return ids, deliver_at > now
+
+
+def pending_uninstalls():
+    """找出当前未可靠确认（含待发送与已下发未回执）的远程卸载指令：返回 {班级: [msg_id, ...]}"""
+    now = time.time()
+    out = {}
+    with lock:
+        snap = list(messages)
+    for m in snap:
+        if is_active_uninstall(m, now):
+            out.setdefault(m["class"], []).append(m["id"])
+    return out
 
 
 def homework_of(cls, date=None):
@@ -781,34 +873,349 @@ EXAM_NOTICE = "手机、智能手表等电子设备关机，放到讲台\n按考
 EXAM_VOICE = {"start": "考试开始，请开始答题", "warn": "距离考试结束还有十五分钟", "end": "考试结束，请停止作答"}
 
 
+def parse_audio_info(path, ext):
+    """纯标准库校验 MP3 / WAV 文件头并估算时长（秒），返回 {"duration": int}；非法文件返回 None"""
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return None
+    if size < 64:
+        return None
+    if ext == "wav":
+        try:
+            with wave.open(path, "rb") as w:
+                rate = w.getframerate()
+                nframes = w.getnframes()
+                ch = w.getnchannels()
+                sw = w.getsampwidth()
+                if rate <= 0 or nframes <= 0 or ch <= 0 or sw <= 0:
+                    return None
+                max_frames = max(1, (size - 44) // (ch * sw))
+                real_frames = min(nframes, max_frames)
+                return {"duration": max(1, int(round(real_frames / float(rate))))}
+        except Exception:
+            return None
+    if ext == "mp3":
+        try:
+            with open(path, "rb") as f:
+                # 逐个跳过文件开头可能连续存在的 ID3v2 标签
+                audio_offset = 0
+                for _ in range(8):
+                    f.seek(audio_offset)
+                    hdr = f.read(10)
+                    if len(hdr) < 10 or hdr[:3] != b"ID3":
+                        break
+                    if (hdr[6] | hdr[7] | hdr[8] | hdr[9]) & 0x80:
+                        break
+                    tag_size = ((hdr[6] & 0x7F) << 21) | ((hdr[7] & 0x7F) << 14) | ((hdr[8] & 0x7F) << 7) | (hdr[9] & 0x7F)
+                    step = 10 + tag_size + (10 if (hdr[3] == 4 and (hdr[5] & 0x10)) else 0)
+                    if step <= 0 or audio_offset + step >= size:
+                        return None
+                    audio_offset += step
+                f.seek(audio_offset)
+                head = f.read(min(size - audio_offset, 65536))
+        except OSError:
+            return None
+        if len(head) < 16:
+            return None
+        # MPEG 音频帧头查表（仅严格匹配 Layer III，即真实 MP3）
+        br_v1_l3 = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0]
+        br_v2_l3 = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0]
+        sr_tbl = {3: [44100, 48000, 32000], 2: [22050, 24000, 16000], 0: [11025, 12000, 8000]}
+        end = min(len(head) - 4, 32768)
+        found = None
+        i = 0
+        while i < end:
+            if head[i] == 0xFF and (head[i + 1] & 0xE0) == 0xE0:
+                b1, b2, b3 = head[i + 1], head[i + 2], head[i + 3]
+                ver = (b1 >> 3) & 0x03
+                layer = (b1 >> 1) & 0x03
+                br_i = (b2 >> 4) & 0x0F
+                sr_i = (b2 >> 2) & 0x03
+                pad = (b2 >> 1) & 0x01
+                chan = (b3 >> 6) & 0x03
+                if ver in sr_tbl and layer == 1 and 1 <= br_i <= 14 and sr_i <= 2:
+                    sr = sr_tbl[ver][sr_i]
+                    kbps = br_v1_l3[br_i] if ver == 3 else br_v2_l3[br_i]
+                    if kbps > 0 and sr > 0:
+                        spf = 1152 if ver == 3 else 576
+                        frame_len = (int((144000 * kbps) // sr) if ver == 3 else int((72000 * kbps) // sr)) + pad
+                        nxt = i + frame_len
+                        # 严格验证第二帧头存在且版本、层、采样率一致，杜绝伪帧头误判
+                        if nxt + 3 < len(head) and head[nxt] == 0xFF and (head[nxt + 1] & 0xE0) == 0xE0:
+                            nver = (head[nxt + 1] >> 3) & 0x03
+                            nlayer = (head[nxt + 1] >> 1) & 0x03
+                            nbr = (head[nxt + 2] >> 4) & 0x0F
+                            nsr = (head[nxt + 2] >> 2) & 0x03
+                            if nver == ver and nlayer == 1 and 1 <= nbr <= 14 and nsr == sr_i:
+                                found = (i, ver, kbps, sr, spf, chan)
+                                break
+            i += 1
+        if not found:
+            return None
+        fi, ver, kbps, sr, spf, chan = found
+        # 优先检查 VBR Xing / Info 头获取准确帧数（若带 CRC16 保护位则偏移 +2 字节）
+        crc_len = 2 if (head[fi + 1] & 0x01) == 0 else 0
+        side = (17 if chan == 3 else 32) if ver == 3 else (9 if chan == 3 else 17)
+        xi = fi + 4 + crc_len + side
+        dur = 0
+        if xi + 12 <= len(head) and head[xi:xi + 4] in (b"Xing", b"Info"):
+            flags = struct.unpack(">I", head[xi + 4:xi + 8])[0]
+            if flags & 0x01:
+                frames_n = struct.unpack(">I", head[xi + 8:xi + 12])[0]
+                if frames_n > 0:
+                    dur = int(round(frames_n * spf / float(sr)))
+        if not dur and fi + 54 <= len(head) and head[fi + 36:fi + 40] == b"VBRI":
+            frames_n = struct.unpack(">I", head[fi + 50:fi + 54])[0]
+            if frames_n > 0:
+                dur = int(round(frames_n * spf / float(sr)))
+        if not dur:
+            # 缺少 Xing/Info/VBRI 可靠时长头时，流式扫描整文件帧头精准数帧（不凭前 32 帧猜 CBR，彻底避免片头静音 VBR 算错时长）
+            br_tbl = br_v1_l3 if ver == 3 else br_v2_l3
+            mult = 144000 if ver == 3 else 72000
+            sr_idx = sr_tbl[ver].index(sr)
+            try:
+                frames_n = 0
+                with open(path, "rb") as f:
+                    f.seek(audio_offset + fi)
+                    buf = b""
+                    pos = 0
+                    eof = False
+                    while True:
+                        if len(buf) - pos < 4096 and not eof:
+                            chunk = f.read(262144)
+                            if chunk:
+                                buf = buf[pos:] + chunk
+                                pos = 0
+                            else:
+                                eof = True
+                        blen = len(buf)
+                        if blen - pos < 4:
+                            break
+                        if buf[pos] == 0xFF and (buf[pos + 1] & 0xE0) == 0xE0:
+                            sv = (buf[pos + 1] >> 3) & 0x03
+                            sl = (buf[pos + 1] >> 1) & 0x03
+                            sb = (buf[pos + 2] >> 4) & 0x0F
+                            ssr = (buf[pos + 2] >> 2) & 0x03
+                            spad = (buf[pos + 2] >> 1) & 0x01
+                            if sv == ver and sl == 1 and 1 <= sb <= 14 and ssr == sr_idx:
+                                flen = int((mult * br_tbl[sb]) // sr) + spad
+                                if flen >= 4 and pos + flen <= blen:
+                                    frames_n += 1
+                                    pos += flen
+                                    continue
+                        # 跳过非音频字节（如末尾 ID3v1/APE 标签）
+                        nx_ff = buf.find(b"\xff", pos + 1)
+                        if nx_ff > 0:
+                            pos = nx_ff
+                        else:
+                            pos = blen
+                if frames_n > 0:
+                    dur = int(round(frames_n * spf / float(sr)))
+            except OSError:
+                pass
+            if not dur:
+                tail_tag = 0
+                try:
+                    if size >= 128:
+                        with open(path, "rb") as f:
+                            f.seek(size - 128)
+                            if f.read(3) == b"TAG":
+                                tail_tag = 128
+                except OSError:
+                    pass
+                data_bytes = max(0, size - tail_tag - (audio_offset + fi))
+                dur = max(1, int(round(data_bytes * 8.0 / (kbps * 1000.0))))
+        return {"duration": max(1, dur)}
+    return None
+
+
+def purge_exam_audio():
+    """清理考完/创建超过 7 天的听力音频，以及上传超过 2 小时仍未被任何考试或平时听力引用的孤儿/残留文件（调用时已持有 lock）"""
+    now = time.time()
+    cutoff_day = (now_cn() - timedelta(days=EXAM_AUDIO_KEEP_DAYS)).strftime("%Y-%m-%d")
+    # 顺带清理 7 天前的平时听力任务
+    if listen_tasks:
+        before_n = len(listen_tasks)
+        listen_tasks[:] = [t for t in listen_tasks if t.get("date", "") >= cutoff_day]
+        if len(listen_tasks) != before_n:
+            write_json(LISTEN_PATH, listen_tasks)
+    active_ids = set()
+    for e in exams:
+        for x in e.get("sessions") or []:
+            aid = x.get("audio_id")
+            if aid and x.get("date", "") >= cutoff_day:
+                active_ids.add(aid)
+    for t in listen_tasks:
+        aid = t.get("audio_id")
+        if aid and t.get("date", "") >= cutoff_day:
+            active_ids.add(aid)
+    gone = []
+    for aid, info in list(exam_audios.items()):
+        if aid in active_ids:
+            continue
+        used_any = any(x.get("audio_id") == aid for e in exams for x in e.get("sessions") or []) or any(t.get("audio_id") == aid for t in listen_tasks)
+        if now - info.get("at", 0) < EXAM_AUDIO_ORPHAN_TTL and not used_any and not info.get("bound"):
+            continue  # 刚上传还在编辑表单里且从未保存过的音频先留 30 分钟；曾绑定后主动删掉/替换的立刻清理
+        gone.append(aid)
+    if gone:
+        for aid in gone:
+            info = exam_audios.pop(aid, None)
+            exam_audio_ready.pop(aid, None)
+            if info:
+                p = os.path.join(EXAM_AUDIO_DIR, f"{aid}.{info.get('ext', 'mp3')}")
+                try:
+                    if os.path.exists(p):
+                        os.remove(p)
+                except OSError:
+                    pass
+        write_json(EXAM_AUDIO_PATH, exam_audios)
+    # 同步清扫磁盘上异常中断残留的 .part 或未登记孤立文件（超过 2 小时）
+    known_files = {f"{aid}.{info.get('ext', 'mp3')}" for aid, info in exam_audios.items()}
+    try:
+        if os.path.isdir(EXAM_AUDIO_DIR):
+            for fn in os.listdir(EXAM_AUDIO_DIR):
+                if fn in known_files:
+                    continue
+                fp = os.path.join(EXAM_AUDIO_DIR, fn)
+                try:
+                    if os.path.isfile(fp) and now - os.path.getmtime(fp) > 7200:
+                        os.remove(fp)
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    # 清理内存中过期的播控记录（超过 6 小时）
+    for k in [k for k, v in exam_audio_play.items() if now - v.get("at", 0) > 6 * 3600]:
+        exam_audio_play.pop(k, None)
+
+
+def listen_tasks_for_board(cls, date=None):
+    """本班近 7 天内的平时听力任务：今天定时的带 play_ts 供自动起播，其他天的仅用于同步存活校验"""
+    if PUBLIC:
+        return []
+    date = date or today()
+    cutoff_day = (now_cn() - timedelta(days=EXAM_AUDIO_KEEP_DAYS)).strftime("%Y-%m-%d")
+    out = []
+    with lock:
+        tasks_snap = [dict(t, classes=list(t.get("classes", []))) for t in listen_tasks if cls in t.get("classes", []) and t.get("date", "") >= cutoff_day]
+        aud_snap = {aid: dict(info) for aid, info in exam_audios.items()}
+    for t in tasks_snap:
+        aid = t.get("audio_id")
+        a = aud_snap.get(aid) if aid else None
+        if not a:
+            continue
+        pat = t.get("play_at") or ""
+        play_ts = None
+        if t.get("date") == date and pat and re_hm(pat):
+            try:
+                play_ts = datetime.combine(datetime.strptime(date, "%Y-%m-%d").date(), datetime.strptime(pat, "%H:%M").time(), CN).timestamp()
+            except ValueError:
+                play_ts = None
+        out.append({"id": t["id"], "title": t["title"], "date": t["date"], "play_at": pat, "play_ts": play_ts,
+                    "audio": {"id": aid, "name": a["name"], "ext": a["ext"], "size": a["size"],
+                              "sha256": a["sha256"], "duration": a["duration"], "url": f"/exam-audio/{aid}"}})
+    return out
+
+
+def exam_audio_prefetch_for(cls):
+    """本班今天及未来 7 天内未结束考试，以及近 7 天内平时听力所需的音频清单（给一体机后台静默预下载）"""
+    if PUBLIC:
+        return []
+    d0 = today()
+    d_past = (now_cn() - timedelta(days=EXAM_AUDIO_KEEP_DAYS)).strftime("%Y-%m-%d")
+    d1 = (now_cn() + timedelta(days=7)).strftime("%Y-%m-%d")
+    out, seen = [], set()
+    with lock:
+        ex_snap = [{**e, "classes": list(e.get("classes", [])), "sessions": list(e.get("sessions") or []),
+                    "ended": dict(e.get("ended") or {})} for e in exams if cls in e.get("classes", [])]
+        lt_snap = [dict(t, classes=list(t.get("classes", []))) for t in listen_tasks if cls in t.get("classes", [])]
+        aud_snap = {aid: dict(info) for aid, info in exam_audios.items()}
+    for e in ex_snap:
+        for i, x in enumerate(e.get("sessions") or []):
+            aid = x.get("audio_id")
+            a = aud_snap.get(aid) if aid else None
+            if not a or aid in seen:
+                continue
+            if not (d0 <= x.get("date", "") <= d1):
+                continue
+            if (e.get("ended") or {}).get(f"{cls}|{i}"):
+                continue
+            seen.add(aid)
+            out.append({"id": aid, "name": a["name"], "ext": a["ext"], "size": a["size"],
+                        "sha256": a["sha256"], "duration": a["duration"],
+                        "url": f"/exam-audio/{aid}", "date": x["date"]})
+    for t in lt_snap:
+        aid = t.get("audio_id")
+        a = aud_snap.get(aid) if aid else None
+        if not a or aid in seen:
+            continue
+        if not (d_past <= t.get("date", "") <= d1):
+            continue
+        seen.add(aid)
+        out.append({"id": aid, "name": a["name"], "ext": a["ext"], "size": a["size"],
+                    "sha256": a["sha256"], "duration": a["duration"],
+                    "url": f"/exam-audio/{aid}", "date": t["date"]})
+    return out
+
+
 def exam_sessions(cls, date=None):
-    """这个班某天（默认今天）的各场考试，按开考时间排好；每场带上大屏要用的时间戳"""
+    """这个班某天（默认今天）的各场考试，按开考时间排好；每场带上大屏要用的时间戳和可选听力信息"""
     date = date or today()
     out = []
-    for e in exams:
+    for e in list(exams):
         if cls not in e["classes"]:
             continue
-        order = sorted(range(len(e["sessions"])), key=lambda i: (e["sessions"][i]["date"], e["sessions"][i]["start"]))
+        ss = list(e["sessions"])
+        ended_map = dict(e.get("ended") or {})
+        order = sorted(range(len(ss)), key=lambda i: (ss[i]["date"], ss[i]["start"]))
         for n, i in enumerate(order):
-            x = e["sessions"][i]
+            x = ss[i]
             if x["date"] != date:
                 continue
             ts = lambda hm: datetime.combine(datetime.strptime(date, "%Y-%m-%d").date(), datetime.strptime(hm, "%H:%M").time(), CN).timestamp()
             start, end = ts(x["start"]), ts(x["end"])
-            ended = (e.get("ended") or {}).get(f"{cls}|{i}")
-            nx = next((e["sessions"][j] for j in order[n + 1:]), None)
+            ended = ended_map.get(f"{cls}|{i}")
+            nx = next((ss[j] for j in order[n + 1:]), None)
+            audio = None
+            show_from = start - EXAM_BEFORE
+            aid = x.get("audio_id") if not PUBLIC else None
+            a = exam_audios.get(aid) if aid else None
+            if a:
+                astart = x.get("audio_start") or x["start"]
+                try:
+                    astart_ts = ts(astart)
+                except ValueError:
+                    astart, astart_ts = x["start"], start
+                audio = {"id": aid, "name": a["name"], "ext": a["ext"], "size": a["size"],
+                         "sha256": a["sha256"], "duration": a["duration"],
+                         "start": astart, "start_ts": astart_ts, "url": f"/exam-audio/{aid}"}
+                show_from = min(show_from, astart_ts - 120)
             out.append({"key": f"{e['id']}-{i}", "exam_id": e["id"], "idx": i, "name": e["name"], "no": n + 1, "total": len(order),
                         "subject": x["subject"], "date": date, "start": x["start"], "end": x["end"], "start_ts": start, "end_ts": end,
-                        "show_from": start - EXAM_BEFORE, "hide_at": min(end + EXAM_AFTER, ended) if ended else end + EXAM_AFTER,
+                        "show_from": show_from, "hide_at": min(end + EXAM_AFTER, ended) if ended else end + EXAM_AFTER,
                         "ended": bool(ended), "notice": [l for l in (e.get("notice") or "").split("\n") if l.strip()],
+                        "audio": audio,
                         "next": {"subject": nx["subject"], "date": nx["date"], "start": nx["start"], "end": nx["end"]} if nx else None})
     return sorted(out, key=lambda x: x["start_ts"])
 
 
 def exam_now(cls, now=None):
-    """这个班现在是不是在考试（开考前 15 分钟到结束后 5 分钟），是就返回那一场"""
+    """这个班现在是不是在考试（开考前 15 分钟到结束后 5 分钟），优先正在进行 > 即将/已到听力起播 > 考后收卷 > 考前等待"""
     now = now or time.time()
-    return next((x for x in exam_sessions(cls) if x["show_from"] <= now < x["hide_at"]), None)
+    cands = [x for x in exam_sessions(cls) if x["show_from"] <= now < x["hide_at"]]
+    if not cands:
+        return None
+    def _prio(x):
+        if x["start_ts"] <= now < x["end_ts"]:
+            return (0, x["start_ts"])
+        au = x.get("audio") or {}
+        if now < x["end_ts"] and au.get("id") and au.get("start_ts") is not None and now >= au["start_ts"] - 120:
+            return (1, au["start_ts"])
+        if now >= x["end_ts"]:
+            return (2, x["end_ts"])
+        return (3, x["start_ts"])
+    return min(cands, key=_prio)
 
 
 _exam_voice = {"at": 0, "urls": {}}
@@ -1272,6 +1679,20 @@ def rename_class(old, new):
             dev_changed = True
     if dev_changed:
         save_devices()
+    for m_ in exam_audio_ready.values():
+        if old in m_:
+            m_[new] = m_.pop(old)
+    for k in list(exam_audio_play):
+        parts = k.split("|", 2)
+        if len(parts) == 3 and parts[2] == old:
+            exam_audio_play[f"{parts[0]}|{parts[1]}|{new}"] = exam_audio_play.pop(k)
+    lt_changed = False
+    for t in listen_tasks:
+        if old in t.get("classes", []):
+            t["classes"] = [new if c == old else c for c in t["classes"]]
+            lt_changed = True
+    if lt_changed:
+        write_json(LISTEN_PATH, listen_tasks)
 
 
 def drop_class(cls):
@@ -1308,6 +1729,28 @@ def drop_class(cls):
         for m in drop_macs:
             devices["bindings"].pop(m, None)
         save_devices()
+    for m_ in exam_audio_ready.values():
+        m_.pop(cls, None)
+    for k in [k for k in exam_audio_play if k.endswith("|" + cls)]:
+        exam_audio_play.pop(k, None)
+    ex_changed = False
+    for e in exams:
+        if cls in e.get("classes", []):
+            e["classes"] = [c for c in e["classes"] if c != cls]
+            e["ended"] = {k: v for k, v in (e.get("ended") or {}).items() if not k.startswith(cls + "|")}
+            ex_changed = True
+    if ex_changed:
+        exams[:] = [e for e in exams if e.get("classes")]
+        save_exams()
+    lt_changed = False
+    for t in listen_tasks:
+        if cls in t.get("classes", []):
+            t["classes"] = [c for c in t["classes"] if c != cls]
+            lt_changed = True
+    if lt_changed:
+        listen_tasks[:] = [t for t in listen_tasks if t.get("classes")]
+        write_json(LISTEN_PATH, listen_tasks)
+    purge_exam_audio()
     purge_files(cls)
 
 
@@ -1339,7 +1782,7 @@ def make_backup():
 
     def skip_cache(info):
         rel = info.name.replace("\\", "/")
-        if rel.startswith(("data/audio", "data/files/")) or re.search(r"data/images/.+_\d+x\d+\.(png|gif)$", rel) or rel.endswith(".tmp"):
+        if rel.startswith(("data/audio", "data/files/", "data/exam_audio/")) or re.search(r"data/images/.+_\d+x\d+\.(png|gif)$", rel) or rel.endswith(".tmp"):
             return None
         return info
     with lock:  # 打包时不让别的请求写数据，保证备份是完整的
@@ -1366,9 +1809,11 @@ def list_backups():
 
 
 def backup_loop():
-    """每天北京时间 3 点以后，如果今天还没备份就备份一次"""
+    """每天北京时间 3 点以后，如果今天还没备份就备份一次；顺带定期清理 7 天前的考试听力文件"""
     while True:
         try:
+            with lock:
+                purge_exam_audio()
             dt = now_cn()
             tag = "data-" + dt.strftime("%Y%m%d")
             if dt.hour >= 3 and not any(b["name"].startswith(tag) for b in list_backups()):
@@ -1432,15 +1877,18 @@ def reminder_loop():
                     write_json(REMINDER_PATH, reminders)
             check_prep(dt)
             for r in due:
+                ruid = r.get("uid") or ""
                 if "{值日}" in r["text"]:
                     for cls in r["classes"]:
                         create_messages([cls], r["text"].replace("{值日}", duty_text(cls)),
                                         r.get("creator", "定时提醒"), voice=r.get("voice"),
-                                        urgent=r.get("urgent"), voice_name=r.get("voice_name"), kind="reminder")
+                                        urgent=r.get("urgent"), voice_name=r.get("voice_name"), kind="reminder",
+                                        sender_uid=ruid, sender_sid="")
                 else:
                     create_messages(r["classes"], r["text"], r.get("creator", "定时提醒"),
                                     voice=r.get("voice"), urgent=r.get("urgent"),
-                                    voice_name=r.get("voice_name"), kind="reminder")
+                                    voice_name=r.get("voice_name"), kind="reminder",
+                                    sender_uid=ruid, sender_sid="")
         except Exception as e:
             print("定时提醒出错：", e)
         time.sleep(15)
@@ -1518,12 +1966,16 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def read_body(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        if not length:
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return {}
+        if length <= 0:
             return {}
         try:
             limit = 12_000_000 if self.path.startswith(("/api/upload", "/api/quiz/import", "/api/roster/parse")) else 100_000
-            return json.loads(self.rfile.read(min(length, limit)).decode("utf-8"))
+            data = json.loads(self.rfile.read(min(length, limit)).decode("utf-8"))
+            return data if isinstance(data, dict) else {}
         except ValueError:
             return {}
 
@@ -1531,14 +1983,38 @@ class Handler(BaseHTTPRequestHandler):
         ip = self.client_address[0]  # 服务器直接对外，只有本机反向代理转发的才认 X-Forwarded-For（否则谁都能伪造，限频就失效了）
         return (self.headers.get("X-Forwarded-For") or ip).split(",")[0].strip() if ip in ("127.0.0.1", "::1") else ip
 
+    def token(self):
+        return (self.headers.get("Authorization") or "").replace("Bearer ", "")
+
+    def sid(self):
+        return session_sid(self.token())
+
     def sess(self):
-        token = (self.headers.get("Authorization") or "").replace("Bearer ", "")
-        s = sessions.get(token)
+        s = sessions.get(self.token())
         return s if s and s.get("uid") and s["exp"] > time.time() else None
 
     def teacher(self):
         s = self.sess()
         return s["name"] if s else None
+
+    def create_msg(self, classes, text, sender, **kw):
+        """带当前登录老师账号 uid 与会话指纹发送大屏消息，防止送达通知串人和越权撤回"""
+        s = self.sess()
+        kw.setdefault("sender_uid", s["uid"] if s else "")
+        kw.setdefault("sender_sid", self.sid() if s else "")
+        return create_messages(classes, text, sender, **kw)
+
+    def is_msg_owner(self, m, s):
+        """判断这条消息是不是当前登录老师本人发的（升级前缺少 sender_uid 的旧消息无法可靠归属，仅允许管理员撤回）"""
+        if not s:
+            return False
+        suid = m.get("sender_uid")
+        if not suid:
+            return False
+        if s["uid"] == "admin":
+            msid = m.get("sender_sid") or ""
+            return suid == "admin" and (not msid or msid == self.sid())
+        return suid == s["uid"]
 
     def role(self, cls):
         """admin（管理员）/ head（班主任）/ teacher（科任老师）/ None"""
@@ -1563,33 +2039,83 @@ class Handler(BaseHTTPRequestHandler):
     def my_classes(self):
         return [c for c in load_students() if self.role(c)]
 
+    def multi_class_denied(self, classes):
+        """公共模式禁止管理员多班群发（防误发其他学校）；普通老师允许同时发给自己加入的多个班"""
+        if len(classes) <= 1:
+            return None
+        if PUBLIC and is_admin(self.sess()):
+            return "公共服务器管理员不支持多班群发，防止误发其他学校"
+        return None
+
     def deny(self, level="teacher"):
-        return self.send_json({"error": "只能修改或删除自己发的内容" if level == "own" else "这个操作只有主管理员（用管理员密码登录）可以做" if level == "owner" else "这个操作只有班主任可以做" if level == "head" else
-                               "管理员才能做这个操作" if level == "admin" else "你不是这个班的老师"}, 403)
+        msg = {
+            "own": "只能修改或删除自己发的内容",
+            "recall": "只能撤回自己发送的消息",
+            "public_forbid": "公共服务器不支持此功能",
+            "owner": "这个操作只有主管理员（用管理员密码登录）可以做",
+            "head": "这个操作只有班主任可以做",
+            "admin": "管理员才能做这个操作",
+        }.get(level, "你不是这个班的老师")
+        return self.send_json({"error": msg}, 403)
 
     def post_check(self, path, body):
         """POST 接口的权限检查：返回 None 表示通过，否则返回 (级别) 表示拒绝"""
         s = self.sess()
         admin, owner = is_admin(s), is_owner(s)
         cls_of = lambda items, key="id": next((x["class"] for x in items if x["id"] == body.get(key)), None)
-        teacher_level = {"/api/board/show", "/api/homework/add", "/api/morning/add", "/api/homework/push", "/api/collect/start", "/api/collect/remind",
+        teacher_level = {"/api/board/show", "/api/morning/add", "/api/homework/push", "/api/collect/start", "/api/collect/remind",
                          "/api/tools/timer", "/api/tools/pick", "/api/image/push", "/api/quiz/import", "/api/quiz/save"}
-        head_level = {"/api/screen/shot", "/api/points/add", "/api/duty/push", "/api/attend/start", "/api/settings", "/api/classroom/uninstall"}
+        head_level = {"/api/screen/shot", "/api/points/add", "/api/duty/push", "/api/attend/start", "/api/settings"}
         if path in teacher_level:
             return None if self.allowed(str(body.get("class") or ""), "teacher") else "teacher"
         if path in head_level:
             return None if self.allowed(str(body.get("class") or ""), "head") else "head"
-        if path in ("/api/notes/add", "/api/files/prepare"):
+        if path == "/api/classroom/uninstall":
+            if body.get("all") or isinstance(body.get("classes"), list):
+                if PUBLIC:
+                    return "public_forbid"
+                return None if admin else "admin"
+            return None if self.allowed(str(body.get("class") or ""), "head") else "head"
+        if path == "/api/classroom/uninstall/cancel":
+            if PUBLIC:
+                return "public_forbid"
+            return None if admin else "admin"
+        if path == "/api/exams/audio/cmd":
+            if PUBLIC:
+                return "public_forbid"
+            cs = body.get("classes") if isinstance(body.get("classes"), list) else ([body.get("class")] if body.get("class") else [])
+            return None if cs and all(self.allowed(str(c), "teacher") for c in cs) else "teacher"
+        if path in ("/api/listen/save", "/api/listen/cmd"):
+            if PUBLIC:
+                return "public_forbid"
+            cs = body.get("classes") if isinstance(body.get("classes"), list) else ([body.get("class")] if body.get("class") else [])
+            return None if cs and all(self.allowed(str(c), "teacher") for c in cs) else "teacher"
+        if path == "/api/listen/delete":
+            if PUBLIC:
+                return "public_forbid"
+            t_ = next((x for x in listen_tasks if x["id"] == body.get("id")), None)
+            if not t_:
+                return None
+            return None if all(self.allowed(c, "head") for c in t_["classes"]) or (s and t_.get("uid") == s["uid"] and all(self.allowed(c, "teacher") for c in t_["classes"])) else "own"
+        if path in ("/api/notes/add", "/api/files/prepare", "/api/homework/add"):
             cs = body.get("classes") if isinstance(body.get("classes"), list) else ([body.get("class")] if body.get("class") else [])
             return None if cs and all(self.allowed(str(c), "teacher") for c in cs) else "teacher"
         if path == "/api/send":
-            return None if body.get("classes") and all(self.allowed(str(c), "teacher") for c in body["classes"]) else "teacher"
+            cs = body.get("classes") if isinstance(body.get("classes"), list) else []
+            return None if cs and all(self.allowed(str(c), "teacher") for c in cs) else "teacher"
         if path == "/api/recall":
             ids = body.get("ids") if isinstance(body.get("ids"), list) else ([body.get("id")] if body.get("id") is not None else [])
-            if not ids:
-                return "teacher"
-            by_id = {m["id"]: m["class"] for m in messages}
-            return None if all(i in by_id and self.allowed(by_id[i], "teacher") for i in ids) else "teacher"
+            if not ids or not all(type(i) is int for i in ids):
+                return "recall"
+            with lock:
+                by_id = {m["id"]: m for m in messages}
+            for i in ids:
+                m = by_id.get(i)
+                if not m or not self.allowed(m["class"], "teacher"):
+                    return "teacher"
+                if not (admin or self.is_msg_owner(m, s)):
+                    return "recall"
+            return None
         if path in ("/api/notes/delete", "/api/notes/edit"):  # 自己的留言自己删改；班主任能删改本班所有留言
             n = next((x for x in notes if x["id"] == body.get("id")), None)
             return None if n and (self.allowed(n["class"], "head") or (s and n.get("uid") == s["uid"])) else "own"
@@ -1597,8 +2123,11 @@ class Handler(BaseHTTPRequestHandler):
             f = next((x for x in files if x["id"] == body.get("id")), None)
             return None if f and (self.allowed(f["class"], "head") or (s and f.get("uid") == s["uid"])) else "own"
         if path in ("/api/exams/save", "/api/exams/delete"):  # 本班老师都能安排考试（任课老师也会安排监考）；改删：班主任全部、任课老师自己建的
+            raw_ss = body.get("sessions") if isinstance(body.get("sessions"), list) else []
+            if path.endswith("save") and PUBLIC and any(isinstance(x, dict) and x.get("audio_id") for x in raw_ss):
+                return "public_forbid"
             old = next((e for e in exams if e["id"] == body.get("id")), None)
-            want = [str(c) for c in (body.get("classes") or [])] if path.endswith("save") else []
+            want = [str(c) for c in (body.get("classes") if isinstance(body.get("classes"), list) else [])] if path.endswith("save") else []
             if not all(self.allowed(c, "teacher") for c in want):
                 return "teacher"
             return None if not old or self.can_edit_exam(old) else "own"
@@ -1617,11 +2146,12 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/api/reminders/save", "/api/reminders/delete"):
             r = next((x for x in reminders if x["id"] == body.get("id")), None)
             if r:  # 改/删已有提醒：自己建的，或者是这个班的班主任
-                own = r.get("creator") == s["name"]
+                own = (r.get("uid") == s["uid"]) if r.get("uid") else (r.get("creator") == s["name"])
                 if not all(self.allowed(c, "head") or (own and self.allowed(c, "teacher")) for c in r["classes"]):
                     return "head"
             if path.endswith("save"):
-                return None if body.get("classes") and all(self.allowed(str(c), "teacher") for c in body["classes"]) else "teacher"
+                cs = body.get("classes") if isinstance(body.get("classes"), list) else []
+                return None if cs and all(self.allowed(str(c), "teacher") for c in cs) else "teacher"
             return None
         if path == "/api/points/delete":
             c = cls_of(points)
@@ -1633,9 +2163,14 @@ class Handler(BaseHTTPRequestHandler):
             target = str(body.get("old") or body.get("class") or "")
             exists = target in load_students()
             return None if (exists and self.allowed(target, "head")) or admin else ("head" if exists else "admin")
-        if path == "/api/schedule":  # 全校作息只有管理员能改；本班作息班主任也能改
-            if body.get("scope") == "class":
+        if path == "/api/schedule":  # 全校作息只有非公共模式管理员能改；本班作息班主任也能改
+            scope = body.get("scope")
+            if scope == "class":
+                if PUBLIC and "apply_all" in body and body.get("apply_all") not in (None, False):
+                    return "public_forbid"
                 return None if self.allowed(str(body.get("class") or ""), "head") else "head"
+            if PUBLIC:
+                return "public_forbid"
             return None if admin else "admin"
         if path == "/api/roster/delete":  # 公共服务器上班主任可以删自己的班
             return None if admin or (PUBLIC and self.role(str(body.get("class") or "")) == "head") else "admin"
@@ -1662,9 +2197,15 @@ class Handler(BaseHTTPRequestHandler):
     def screen_count(self, path, body):
         """这次请求会往大屏发几条消息（公共模式按老师限频用）"""
         if path == "/api/send":
-            return len(body.get("classes") or [])
-        if path in ("/api/homework/add", "/api/points/add"):
-            return 1 if body.get("push") or body.get("praise") else 0
+            raw_cs = body.get("classes") if isinstance(body.get("classes"), list) else []
+            return len(list(dict.fromkeys(str(c).strip() for c in raw_cs if str(c or "").strip())))
+        if path == "/api/homework/add":
+            if not body.get("push"):
+                return 0
+            raw_cs = body.get("classes") if isinstance(body.get("classes"), list) else ([body.get("class")] if body.get("class") else [])
+            return len(list(dict.fromkeys(str(c).strip() for c in raw_cs if str(c or "").strip())))
+        if path == "/api/points/add":
+            return 1 if body.get("praise") else 0
         return 1 if path in ("/api/homework/push", "/api/tools/timer", "/api/tools/pick", "/api/image/push", "/api/collect/start",
                              "/api/collect/remind", "/api/attend/start", "/api/duty/push", "/api/board/show") else 0
 
@@ -1703,6 +2244,41 @@ class Handler(BaseHTTPRequestHandler):
                                    "homework": [{**h, "due_date": due_date(h), "collect": collect_of(cls, h["id"])} for h in items],
                                    "today": today(), "yesterday": (now_cn() - timedelta(days=1)).strftime("%Y-%m-%d"),
                                    "subjects": subjects_of(cls)})
+        if u.path.startswith("/exam-audio/"):  # 一体机后台预下载考试听力音频（多班共用同一份文件，按班校验密钥）
+            if PUBLIC:
+                return self.send_json({"error": "公共服务器不支持考试听力"}, 403)
+            aid = os.path.basename(u.path)
+            cls = (q.get("class") or [""])[0]
+            if not cls or not self.classroom_ok(q, cls):
+                return self.send_json({"error": "not found"}, 404)
+            fh = None
+            ext = "mp3"
+            fsize = 0
+            with lock:
+                info = exam_audios.get(aid)
+                if info:
+                    used = (any(cls in e.get("classes", []) and any(x.get("audio_id") == aid for x in e.get("sessions") or []) for e in exams)
+                            or any(cls in t.get("classes", []) and t.get("audio_id") == aid for t in listen_tasks))
+                    ext = info.get("ext", "mp3")
+                    path = os.path.join(EXAM_AUDIO_DIR, f"{aid}.{ext}")
+                    if used and os.path.isfile(path):
+                        try:
+                            fh = open(path, "rb")
+                            fsize = os.fstat(fh.fileno()).st_size
+                        except OSError:
+                            fh = None
+            if not fh:
+                return self.send_json({"error": "not found"}, 404)
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/mpeg" if ext == "mp3" else "audio/wav")
+                self.send_header("Content-Length", str(fsize))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                shutil.copyfileobj(fh, self.wfile, 1024 * 1024)
+            finally:
+                fh.close()
+            return
         if u.path.startswith("/files/"):  # 一体机下载老师发来的文件（按班校验密钥）
             fid = os.path.basename(u.path)
             f = next((x for x in files if x["id"] == fid), None)
@@ -1863,7 +2439,7 @@ class Handler(BaseHTTPRequestHandler):
             mine = self.my_classes()
             return self.send_json({"classes": [{"name": c, "students": students[c]} for c in mine],
                                    "roles": {c: self.role(c) for c in mine}, "admin": is_admin(s), "owner": is_owner(s),
-                                   "me": s["name"], "mine": None, "public": PUBLIC, "register_open": reg_enabled(),
+                                   "me": s["name"], "uid": s["uid"], "mine": None, "public": PUBLIC, "register_open": reg_enabled(),
                                    "no_schedule": [c for c in mine if c not in settings.get("class_schedule", {})] if PUBLIC else [],
                                    "places": CFG["places"], "voices": VOICES,
                                    "default_voice": default_voice(), "subjects": CFG["subjects"],
@@ -1872,7 +2448,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.teacher():
             return self.send_json({"error": "请先登录"}, 401)
         qcls = (q.get("class") or [""])[0]
-        if u.path in ("/api/homework", "/api/quiz", "/api/morning", "/api/notes", "/api/files", "/api/exams") and not self.allowed(qcls, "teacher"):
+        if u.path in ("/api/homework", "/api/quiz", "/api/morning", "/api/notes", "/api/files", "/api/exams", "/api/listen") and not self.allowed(qcls, "teacher"):
             return self.deny()
         if u.path in ("/api/settings", "/api/points", "/api/attend", "/api/screen/shot", "/api/screen/shot.img") and not self.allowed(qcls, "head"):
             return self.deny("head")
@@ -1914,13 +2490,22 @@ class Handler(BaseHTTPRequestHandler):
             if qcls and not self.allowed(qcls, "teacher"):
                 return self.deny()
             own = settings.get("class_schedule", {}).get(qcls)
+            adm = is_admin(self.sess())
+            show_custom = adm and not PUBLIC
+            students = load_students() if show_custom else {}
+            custom_cls = [c for c in sorted(settings.get("class_schedule") or {}) if c in students] if show_custom else []
             return self.send_json({**schedule_of(qcls), "own": bool(own), "school": school_schedule(),
-                                   "admin": is_admin(self.sess()), "can_class": bool(qcls) and self.allowed(qcls, "head")})
+                                   "admin": adm, "can_class": bool(qcls) and self.allowed(qcls, "head"),
+                                   "custom_classes": custom_cls})
         if u.path == "/api/me":
             s = self.sess()
             u_ = users["users"].get(s["uid"])
-            link = f"http://{self.host()}/login?u={s['uid']}&k={u_['secret']}" if u_ else None
-            return self.send_json({"name": s["name"], "admin": is_admin(s), "owner": is_owner(s), "login_url": link})
+            proto = "https" if (self.client_address[0] in ("127.0.0.1", "::1")
+                                and (self.headers.get("X-Forwarded-Proto") or "").lower() == "https") else "http"
+            base_url = f"{proto}://{self.host()}/"
+            link = f"{proto}://{self.host()}/login?u={s['uid']}&k={u_['secret']}" if u_ else None
+            return self.send_json({"name": s["name"], "uid": s["uid"], "admin": is_admin(s), "owner": is_owner(s),
+                                   "login_url": link, "base_url": base_url})
         if u.path == "/api/invites":
             if not self.allowed(qcls, "head"):
                 return self.deny("head")
@@ -1940,19 +2525,151 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/exams":
             now, d = time.time(), today()
             week_ago = (now_cn() - timedelta(days=7)).strftime("%Y-%m-%d")
+            with lock:
+                ex_snap = [{**e, "classes": list(e["classes"]), "sessions": list(e["sessions"]),
+                            "ended": dict(e.get("ended") or {})} for e in exams]
+                aud_snap = {aid: dict(info) for aid, info in exam_audios.items()}
+                ready_snap = {aid: {c: dict(v) for c, v in m.items()} for aid, m in exam_audio_ready.items()}
+                play_snap = {k: dict(v) for k, v in exam_audio_play.items()}
+                cap_snap = {c: dict(v) for c, v in screen_audio_cap.items()}
+                rv_snap = {c: dict(v) for c, v in screen_rv.items()}
+            live_by_ex = {}
+            for sx in exam_sessions(qcls):
+                live_by_ex.setdefault(sx["exam_id"], {})[sx["idx"]] = sx
             items = []
-            for e in exams:
+            for e in ex_snap:
                 if qcls not in e["classes"] or max(x["date"] for x in e["sessions"]) < week_ago:
                     continue  # 只列这个班的、还没考完的（考完一周内的也留着看）
-                live = {x["idx"]: x for x in exam_sessions(qcls) if x["exam_id"] == e["id"]}
-                items.append({"id": e["id"], "name": e["name"], "classes": e["classes"], "notice": e.get("notice", ""), "creator": e.get("creator", ""),
-                              "can_edit": self.can_edit_exam(e),
-                              "sessions": [{**x, "idx": i, "state": ("ended" if (e.get("ended") or {}).get(f"{qcls}|{i}") else
-                                                                     "live" if i in live and live[i]["show_from"] <= now < live[i]["hide_at"] else
-                                                                     "done" if x["date"] < d or (i in live and now >= live[i]["hide_at"]) else "todo")}
-                                           for i, x in enumerate(e["sessions"])]})
+                live = live_by_ex.get(e["id"], {})
+                ctrl_cls = [c for c in e["classes"] if self.allowed(c, "teacher")]
+                sess_out = []
+                for i, x in enumerate(e["sessions"]):
+                    st_name = ("ended" if (e.get("ended") or {}).get(f"{qcls}|{i}") else
+                               "live" if i in live and live[i]["show_from"] <= now < live[i]["hide_at"] else
+                               "done" if x["date"] < d or (i in live and now >= live[i]["hide_at"]) else "todo")
+                    row = {**x, "idx": i, "state": st_name}
+                    aid = x.get("audio_id") if not PUBLIC else None
+                    a = aud_snap.get(aid) if aid else None
+                    if a:
+                        row["audio"] = {"id": aid, "name": a["name"], "ext": a["ext"], "size": a["size"],
+                                        "duration": a["duration"], "sha256": a["sha256"][:12],
+                                        "start": x.get("audio_start") or x["start"]}
+                        rmap = ready_snap.get(aid) or {}
+                        cls_states = []
+                        ready_n = 0
+                        playing_list = []
+                        error_list = []
+                        for c in ctrl_cls:
+                            on = now - last_seen.get(c, 0) < 15
+                            rs = rmap.get(c) or {}
+                            if rs.get("status") == "ready":
+                                cst, pct, err = "ready", 100, ""
+                                ready_n += 1
+                            elif rs.get("status") == "downloading" and on and now - rs.get("at", 0) < 90:
+                                cst, pct, err = "downloading", int(rs.get("pct") or 0), ""
+                            elif rs.get("status") == "error" and now - rs.get("at", 0) < 180:
+                                cst, pct, err = "error", 0, rs.get("err") or "下载校验失败"
+                            elif not on:
+                                cst, pct, err = "offline", 0, ""
+                            else:
+                                cst, pct, err = "pending", 0, ""
+                            cap = cap_snap.get(c)
+                            rv_info = rv_snap.get(c)
+                            cap_warn = ""
+                            if on and rv_info and 0 < rv_info.get("rv", 0) < 6:
+                                cap_warn = "等待大屏自动更新（暂不支持可靠控场）"
+                            elif cap:
+                                if not cap.get("can_wav", True) and not cap.get("can_mp3", True):
+                                    cap_warn = "缺少音频播放器"
+                                elif a["ext"] == "mp3" and not cap.get("can_mp3", True):
+                                    cap_warn = "缺 ffplay（无法播 MP3）"
+                                elif not cap.get("can_seek", True):
+                                    cap_warn = "缺 ffplay（不支持暂停续播）"
+                            ps = play_snap.get(f"{e['id']}|{i}|{c}")
+                            if ps and now - ps.get("at", 0) < 25 and ps.get("state") in ("playing", "paused", "testing"):
+                                playing_list.append({"class": c, "state": ps["state"], "pos": int(ps.get("pos") or 0),
+                                                     "dur": int(ps.get("dur") or a["duration"]),
+                                                     "audio_id": ps.get("audio_id") or "",
+                                                     "mismatch": bool(ps.get("audio_id") and ps.get("audio_id") != aid)})
+                            elif ps and now - ps.get("at", 0) < 120 and ps.get("state") == "error":
+                                error_list.append({"class": c, "err": ps.get("err") or "播放失败"})
+                            cls_states.append({"class": c, "online": on, "status": cst, "pct": pct, "err": err, "cap_warn": cap_warn})
+                        row["audio_status"] = {"total": len(ctrl_cls), "ready": ready_n, "classes": cls_states, "playing": playing_list, "errors": error_list}
+                    sess_out.append(row)
+                items.append({"id": e["id"], "name": e["name"], "classes": e["classes"], "ctrl_classes": ctrl_cls,
+                              "notice": e.get("notice", ""), "creator": e.get("creator", ""),
+                              "can_edit": self.can_edit_exam(e), "sessions": sess_out})
             items.sort(key=lambda e: min((x["date"], x["start"]) for x in e["sessions"]))
-            return self.send_json({"items": items, "default_notice": EXAM_NOTICE})
+            return self.send_json({"items": items, "default_notice": EXAM_NOTICE, "audio_enabled": not PUBLIC,
+                                   "audio_max_mb": EXAM_AUDIO_MAX // 1024 // 1024, "audio_early_max": EXAM_AUDIO_EARLY_MAX})
+        if u.path == "/api/listen":
+            if PUBLIC:
+                return self.send_json({"items": [], "audio_enabled": False, "audio_max_mb": EXAM_AUDIO_MAX // 1024 // 1024})
+            now = time.time()
+            s = self.sess()
+            week_ago = (now_cn() - timedelta(days=EXAM_AUDIO_KEEP_DAYS)).strftime("%Y-%m-%d")
+            with lock:
+                lt_snap = [dict(t, classes=list(t.get("classes", []))) for t in reversed(listen_tasks)]
+                aud_snap = {aid: dict(info) for aid, info in exam_audios.items()}
+                ready_snap = {aid: {c: dict(v) for c, v in m.items()} for aid, m in exam_audio_ready.items()}
+                play_snap = {k: dict(v) for k, v in exam_audio_play.items()}
+                cap_snap = {c: dict(v) for c, v in screen_audio_cap.items()}
+                rv_snap = {c: dict(v) for c, v in screen_rv.items()}
+            items = []
+            for t in lt_snap:
+                if qcls not in t.get("classes", []) or t.get("date", "") < week_ago:
+                    continue
+                aid = t.get("audio_id") or ""
+                a = aud_snap.get(aid)
+                if not a:
+                    continue
+                ctrl_cls = [c for c in t["classes"] if self.allowed(c, "teacher")]
+                rmap = ready_snap.get(aid) or {}
+                cls_states, ready_n, playing_list, error_list = [], 0, [], []
+                for c in ctrl_cls:
+                    on = now - last_seen.get(c, 0) < 15
+                    rs = rmap.get(c) or {}
+                    if rs.get("status") == "ready":
+                        cst, pct, err = "ready", 100, ""
+                        ready_n += 1
+                    elif rs.get("status") == "downloading" and on and now - rs.get("at", 0) < 90:
+                        cst, pct, err = "downloading", int(rs.get("pct") or 0), ""
+                    elif rs.get("status") == "error" and now - rs.get("at", 0) < 180:
+                        cst, pct, err = "error", 0, rs.get("err") or "下载校验失败"
+                    elif not on:
+                        cst, pct, err = "offline", 0, ""
+                    else:
+                        cst, pct, err = "pending", 0, ""
+                    cap = cap_snap.get(c)
+                    rv_info = rv_snap.get(c)
+                    cap_warn = ""
+                    if on and rv_info and 0 < rv_info.get("rv", 0) < 6:
+                        cap_warn = "等待大屏自动更新（暂不支持可靠控场）"
+                    elif cap:
+                        if not cap.get("can_wav", True) and not cap.get("can_mp3", True):
+                            cap_warn = "缺少音频播放器"
+                        elif a["ext"] == "mp3" and not cap.get("can_mp3", True):
+                            cap_warn = "缺 ffplay（无法播 MP3）"
+                        elif not cap.get("can_seek", True):
+                            cap_warn = "缺 ffplay（不支持暂停续播）"
+                    ps = play_snap.get(f"listen|{t['id']}|{c}")
+                    if ps and now - ps.get("at", 0) < 25 and ps.get("state") in ("playing", "paused", "testing"):
+                        playing_list.append({"class": c, "state": ps["state"], "pos": int(ps.get("pos") or 0),
+                                             "dur": int(ps.get("dur") or a["duration"])})
+                    elif ps and now - ps.get("at", 0) < 120 and ps.get("state") == "error":
+                        error_list.append({"class": c, "err": ps.get("err") or "播放失败"})
+                    cls_states.append({"class": c, "online": on, "status": cst, "pct": pct, "err": err, "cap_warn": cap_warn})
+                can_del = all(self.allowed(c, "head") for c in t["classes"]) or bool(
+                    s and t.get("uid") == s["uid"] and all(self.allowed(c, "teacher") for c in t["classes"]))
+                items.append({
+                    "id": t["id"], "title": t["title"], "classes": t["classes"], "ctrl_classes": ctrl_cls,
+                    "date": t["date"], "play_at": t.get("play_at") or "", "creator": t.get("creator", ""),
+                    "can_delete": bool(can_del),
+                    "audio": {"id": aid, "name": a["name"], "ext": a["ext"], "size": a["size"],
+                              "duration": a["duration"], "sha256": a["sha256"][:12]},
+                    "audio_status": {"total": len(ctrl_cls), "ready": ready_n, "classes": cls_states, "playing": playing_list, "errors": error_list},
+                })
+            return self.send_json({"items": items, "audio_enabled": True, "audio_max_mb": EXAM_AUDIO_MAX // 1024 // 1024})
         if u.path == "/api/morning":
             d1 = today()
             d2 = next_school_day(qcls, d1)
@@ -2011,6 +2728,10 @@ class Handler(BaseHTTPRequestHandler):
             admin = is_admin(self.sess())
             mine = {c: v for c, v in load_students().items() if self.allowed(c, "head")}
             devs = device_map_by_class() if not PUBLIC else {}
+            now_r = time.time()
+            with lock:
+                rv_map = {c: (screen_rv.get(c) or {}).get("rv", 0) for c in mine}
+            old_screens = sorted([c for c in mine if now_r - last_seen.get(c, 0) < 15 and 0 < rv_map.get(c, 0) < 6], key=class_sort_key)
             return self.send_json({"classes": [{"name": c, "count": len(v), "names": [x["name"] for x in v], "role": self.role(c)}
                                                for c, v in mine.items()], "install": cmd, "install_win": win,
                                    "install_auto": auto_cmd if admin and not PUBLIC else "",
@@ -2020,8 +2741,11 @@ class Handler(BaseHTTPRequestHandler):
                                    "devices": {c: devs[c] for c in mine if c in devs},
                                    "device_list": device_list_info() if admin and not PUBLIC else [],
                                    "device_bind_open": bool(settings.get("device_bind_open")) if admin and not PUBLIC else False,
+                                   "pending_uninstall": sorted(pending_uninstalls().keys(), key=class_sort_key) if admin and not PUBLIC else [],
+                                   "old_screens": old_screens if admin and not PUBLIC else [],
+                                   "screen_rv": rv_map if admin and not PUBLIC else {},
                                    "admin": admin, "public": PUBLIC,
-                                   "online": {c: time.time() - last_seen.get(c, 0) < 15 for c in mine}})
+                                   "online": {c: now_r - last_seen.get(c, 0) < 15 for c in mine}})
         if u.path == "/api/files":
             uid, head = self.sess()["uid"], self.allowed(qcls, "head")
             with lock:
@@ -2059,6 +2783,8 @@ class Handler(BaseHTTPRequestHandler):
         q = parse_qs(u.query)
         if u.path == "/api/files/upload":  # 请求体是文件本身，不是 JSON
             return self.api_file_upload(q)
+        if u.path == "/api/exams/audio/upload":  # 考试听力原始音频文件流（MP3 / WAV，上限 80MB）
+            return self.api_exam_audio_upload(q)
         if u.path == "/api/screen/shot/upload":  # 一体机传上来的屏幕截图（请求体是图片本身）
             return self.api_shot_upload(q)
         body = self.read_body()
@@ -2076,8 +2802,11 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/login/link":
             return self.api_login_link(body)
         if u.path == "/api/ack":  # 一体机只传消息 id：按这条消息所在的班校验密钥
-            m = next((x for x in messages if x["id"] == body.get("id")), None)
-            if not m or not self.classroom_ok(q, m["class"]):
+            mid = body.get("id")
+            with lock:
+                m = next((x for x in messages if type(mid) is int and x["id"] == mid), None)
+                mcls = m["class"] if m else ""
+            if not m or not self.classroom_ok(q, mcls):
                 return self.send_json({"error": "密钥错误"}, 403)
             return self.api_ack(body)
         if u.path == "/api/screen/tool":  # 一体机右边的「工具」：老师在大屏上直接点计时、抽号
@@ -2097,6 +2826,13 @@ class Handler(BaseHTTPRequestHandler):
             if not self.classroom_ok(q, body.get("class")):
                 return self.send_json({"error": "密钥错误"}, 403)
             return self.api_attend_save(body)
+        if u.path == "/api/exams/audio/status":  # 一体机上报听力缓存就绪进度与当前播控状态
+            if PUBLIC:
+                return self.deny("public_forbid")
+            cls = str(body.get("class") or "")
+            if not cls or cls not in load_students() or not self.classroom_ok(q, cls):
+                return self.send_json({"error": "密钥错误"}, 403)
+            return self.api_exam_audio_status(body)
         if u.path == "/api/device/check":
             return self.api_device_check(body)
         if u.path == "/api/device/bind":
@@ -2145,8 +2881,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/members/remove": self.api_member_remove, "/api/members/role": self.api_member_role, "/api/schedule": self.api_schedule,
             "/api/board/show": self.api_board_show, "/api/register/code": self.api_register_code,
             "/api/classroom/uninstall": self.api_classroom_uninstall,
+            "/api/classroom/uninstall/cancel": self.api_classroom_uninstall_cancel,
             "/api/morning/add": self.api_morning_add, "/api/morning/delete": self.api_morning_delete,
             "/api/exams/save": self.api_exam_save, "/api/exams/delete": self.api_exam_delete, "/api/exams/end": self.api_exam_end,
+            "/api/exams/audio/cmd": self.api_exam_audio_cmd,
+            "/api/listen/save": self.api_listen_save, "/api/listen/delete": self.api_listen_delete, "/api/listen/cmd": self.api_listen_cmd,
             "/api/notes/add": self.api_note_add, "/api/notes/edit": self.api_note_edit, "/api/notes/delete": self.api_note_delete,
             "/api/files/prepare": self.api_file_prepare, "/api/files/delete": self.api_file_delete,
             "/api/admin/password": self.api_admin_password, "/api/admins/set": self.api_admins_set,
@@ -2329,36 +3068,82 @@ class Handler(BaseHTTPRequestHandler):
 
     def api_schedule(self, body, sender):
         cls = str(body.get("class") or "")
-        if body.get("scope") == "class" and body.get("reset"):  # 恢复使用全校作息
+        raw_scope = body.get("scope")
+        if raw_scope is None:
+            scope = "school"
+        elif raw_scope in ("class", "school"):
+            scope = raw_scope
+        else:
+            return self.send_json({"error": "scope 参数不对"}, 400)
+        if PUBLIC and scope != "class":
+            return self.deny("public_forbid")
+        apply_all_raw = body.get("apply_all", False)
+        if type(apply_all_raw) is not bool:
+            return self.send_json({"error": "apply_all 参数必须是布尔值"}, 400)
+        apply_all = apply_all_raw
+        if PUBLIC and apply_all:
+            return self.deny("public_forbid")
+        if scope == "class" and apply_all:
+            return self.send_json({"error": "本班作息不支持覆盖全校"}, 400)
+        if scope == "class" and (not cls or cls not in load_students()):
+            return self.send_json({"error": "请选择有效班级"}, 400)
+        show_custom = is_admin(self.sess()) and not PUBLIC
+        if scope == "class" and body.get("reset"):  # 恢复使用全校作息
             with lock:
                 settings.setdefault("class_schedule", {}).pop(cls, None)
                 write_json(SETTINGS_PATH, settings)
-            return self.send_json({"ok": True, **schedule_of(cls), "own": False})
+                students = load_students() if show_custom else {}
+                custom_cls = [c for c in sorted(settings.get("class_schedule") or {}) if c in students] if show_custom else []
+            return self.send_json({"ok": True, **schedule_of(cls), "own": False, "custom_classes": custom_cls})
+        raw_periods = body.get("periods")
+        if not isinstance(raw_periods, list) or not (1 <= len(raw_periods) <= 30):
+            return self.send_json({"error": "请填写 1 至 30 节课的作息时间"}, 400)
         periods = []
-        for p_ in body.get("periods") or []:
+        for idx_, p_ in enumerate(raw_periods, 1):
+            if not isinstance(p_, (list, tuple)) or len(p_) != 2 or not all(isinstance(x, str) for x in p_):
+                return self.send_json({"error": f"第 {idx_} 节时间格式不对"}, 400)
+            s1, s2 = p_[0].strip(), p_[1].strip()
+            if not (re.fullmatch(r"\d{1,2}:\d{2}", s1) and re.fullmatch(r"\d{1,2}:\d{2}", s2)):
+                return self.send_json({"error": f"第 {idx_} 节时间格式不对：{s1}–{s2}"}, 400)
             try:
-                a_, b_ = [datetime.strptime(x.strip(), "%H:%M").strftime("%H:%M") for x in p_]
-            except (ValueError, TypeError):
-                return self.send_json({"error": f"时间格式不对：{p_}"}, 400)
+                a_ = datetime.strptime(s1, "%H:%M").strftime("%H:%M")
+                b_ = datetime.strptime(s2, "%H:%M").strftime("%H:%M")
+            except ValueError:
+                return self.send_json({"error": f"第 {idx_} 节时间无效：{s1}–{s2}"}, 400)
             if a_ >= b_:
-                return self.send_json({"error": f"结束时间要晚于开始时间：{a_}–{b_}"}, 400)
+                return self.send_json({"error": f"第 {idx_} 节结束时间要晚于开始时间：{a_}–{b_}"}, 400)
             periods.append([a_, b_])
-        days = sorted({int(d) for d in body.get("weekdays") or [] if 1 <= int(d) <= 7})
-        if not periods or not days:
-            return self.send_json({"error": "请至少填一节课和一个上课日"}, 400)
+        raw_days = body.get("weekdays")
+        if not isinstance(raw_days, list) or not raw_days:
+            return self.send_json({"error": "请至少选择一个上课日"}, 400)
+        days_set = set()
+        for d in raw_days:
+            if type(d) is not int or not (1 <= d <= 7):
+                return self.send_json({"error": "上课日参数不对"}, 400)
+            days_set.add(d)
+        days = sorted(days_set)
         sch = {"periods": sorted(periods), "weekdays": days}
+        cleared = 0
         with lock:
-            if body.get("scope") == "class":
+            if scope == "class":
                 settings.setdefault("class_schedule", {})[cls] = sch
             else:
                 settings["schedule"] = sch
+                if apply_all:
+                    old_cs = settings.get("class_schedule") or {}
+                    students_all = load_students()
+                    cleared = sum(1 for c in old_cs if c in students_all)
+                    settings["class_schedule"] = {}
             write_json(SETTINGS_PATH, settings)
-        self.send_json({"ok": True, **sch, "own": body.get("scope") == "class"})
+            students = load_students() if show_custom else {}
+            custom_cls = [c for c in sorted(settings.get("class_schedule") or {}) if c in students] if show_custom else []
+        self.send_json({"ok": True, **sch, "own": scope == "class",
+                        "cleared": cleared, "custom_classes": custom_cls})
 
     def api_board_show(self, body, sender):
         """让大屏马上显示看板（不管现在是不是晚自习），碰一下屏幕就收起"""
         cls = str(body.get("class") or "")
-        create_messages([cls], "显示班级看板", sender, kind="standby", urgent=True, expire_at=time.time() + 120)
+        self.create_msg([cls], "显示班级看板", sender, kind="standby", urgent=True, expire_at=time.time() + 120)
         self.send_json({"ok": True})
 
     def api_morning_add(self, body, sender):
@@ -2387,8 +3172,9 @@ class Handler(BaseHTTPRequestHandler):
         subject = str(body.get("subject") or "").strip()[:6]
         if not classes:
             return self.send_json({"error": "请选择班级"}, 400)
-        if PUBLIC and len(classes) > 1:
-            return self.send_json({"error": "公共服务器不支持多班群发"}, 403)
+        err = self.multi_class_denied(classes)
+        if err:
+            return self.send_json({"error": err}, 403)
         if not text:
             return self.send_json({"error": "请填写留言内容"}, 400)
         d = now_cn().date()
@@ -2444,12 +3230,89 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"ok": True})
 
     def api_classroom_uninstall(self, body, sender):
-        """班主任/管理员远程卸载这个班的一体机接收端：一体机收到后自己删掉开机自启、桌面图标和程序"""
+        """班主任单班或管理员批量远程卸载一体机接收端：一体机收到后自己删掉开机自启、桌面图标和程序"""
+        students = load_students()
+        bulk = bool(body.get("all")) or isinstance(body.get("classes"), list)
+        if bulk:
+            if PUBLIC:
+                return self.deny("public_forbid")
+            raw = list(students.keys()) if body.get("all") else (body.get("classes") or [])
+            targets = list(dict.fromkeys(str(c).strip() for c in raw if str(c or "").strip() in students))
+            if not targets:
+                return self.send_json({"error": "请选择至少一个有效班级"}, 400)
+            now = time.time()
+            # 避免重复堆叠 pending 卸载消息：先把这些班旧的未执行卸载指令标记撤回
+            # 注意：若勾选 unbind_mac，不可在此立刻删 MAC 绑定（否则桌面云大屏 /api/poll 会被 rebind 拦截而收不到卸载指令）；
+            # 改为把 unbind_mac=True 写入卸载指令 data，等大屏在 api_poll 实际领取卸载指令时同步解绑，且中途撤销卸载不会误丢绑定
+            unbind_mac = bool(body.get("unbind_mac"))
+            s_cur, cur_sid = self.sess(), self.sid()
+            suid = s_cur["uid"] if s_cur else ""
+            ids = []
+            with lock:
+                for m in messages:
+                    if m["class"] in targets and is_active_uninstall(m, now):
+                        m["recalled"] = True
+                nid = next_id(messages)
+                for c in targets:
+                    messages.append({
+                        "id": nid, "class": c, "text": "远程卸载一体机", "sender": sender,
+                        "sender_uid": suid, "sender_sid": cur_sid, "kind": "uninstall",
+                        "data": {"unbind_mac": True} if unbind_mac else None, "voice": False, "urgent": True,
+                        "audio": None, "created": now, "deliver_at": now, "expire_at": now + 7 * 86400,
+                        "delivered_at": None, "acked_at": None, "who": None, "loud": False, "send_at": None, "speak": None,
+                    })
+                    ids.append(nid)
+                    nid += 1
+                save_messages()
+            on_cnt = sum(1 for c in targets if now - last_seen.get(c, 0) < 15)
+            with lock:
+                old_screens = sorted([c for c in targets if now - last_seen.get(c, 0) < 15 and 0 < (screen_rv.get(c) or {}).get("rv", 0) < 6], key=class_sort_key)
+            return self.send_json({
+                "ok": True, "count": len(targets), "online_count": on_cnt, "offline_count": len(targets) - on_cnt,
+                "online": on_cnt > 0, "classes": targets, "ids": ids,
+                "old_screens": old_screens,
+                "pending_uninstall": sorted(pending_uninstalls().keys(), key=class_sort_key),
+            })
         cls = str(body.get("class") or "")
-        if cls not in load_students():
+        if cls not in students:
             return self.send_json({"error": "没有这个班"}, 404)
-        create_messages([cls], "远程卸载一体机", sender, kind="uninstall", urgent=True, expire_at=time.time() + 7 * 86400)
-        self.send_json({"ok": True, "online": time.time() - last_seen.get(cls, 0) < 15})
+        now = time.time()
+        s_cur, cur_sid = self.sess(), self.sid()
+        suid = s_cur["uid"] if s_cur else ""
+        with lock:
+            has_unbind = any(m["class"] == cls and is_active_uninstall(m, now) and (m.get("data") or {}).get("unbind_mac") for m in messages)
+            if not has_unbind:
+                for m in messages:
+                    if m["class"] == cls and is_active_uninstall(m, now):
+                        m["recalled"] = True
+                nid = next_id(messages)
+                messages.append({
+                    "id": nid, "class": cls, "text": "远程卸载一体机", "sender": sender,
+                    "sender_uid": suid, "sender_sid": cur_sid, "kind": "uninstall",
+                    "data": None, "voice": False, "urgent": True,
+                    "audio": None, "created": now, "deliver_at": now, "expire_at": now + 7 * 86400,
+                    "delivered_at": None, "acked_at": None, "who": None, "loud": False, "send_at": None, "speak": None,
+                })
+                save_messages()
+        self.send_json({"ok": True, "online": now - last_seen.get(cls, 0) < 15})
+
+    def api_classroom_uninstall_cancel(self, body, sender):
+        """管理员撤销尚未可靠确认（含离线待发与已发未回执）的远程卸载指令"""
+        if PUBLIC:
+            return self.deny("public_forbid")
+        target_set = set(str(c).strip() for c in body.get("classes") or [] if str(c or "").strip()) if isinstance(body.get("classes"), list) else None
+        now = time.time()
+        cancelled = 0
+        with lock:
+            for m in messages:
+                if is_active_uninstall(m, now):
+                    if target_set is None or m["class"] in target_set:
+                        m["recalled"] = True
+                        cancelled += 1
+            if cancelled:
+                save_messages()
+        self.send_json({"ok": True, "cancelled": cancelled,
+                        "pending_uninstall": sorted(pending_uninstalls().keys(), key=class_sort_key)})
 
     def admin_info(self):
         """主管理员看的：其他管理员、可以设为管理员的老师、用管理员密码登录着的设备"""
@@ -2527,8 +3390,9 @@ class Handler(BaseHTTPRequestHandler):
         text = str(body.get("text") or "").strip()
         if not classes or not text:
             return self.send_json({"error": "请选择班级并填写内容"}, 400)
-        if PUBLIC and len(classes) > 1:
-            return self.send_json({"error": "公共服务器不支持多班群发"}, 403)
+        err = self.multi_class_denied(classes)
+        if err:
+            return self.send_json({"error": err}, 403)
         if PUBLIC and len(text) > TEXT_LIMIT:
             return self.send_json({"error": f"消息最长 {TEXT_LIMIT} 字"}, 400)
         text = text[:300]
@@ -2540,101 +3404,506 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "定时的时间不对"}, 400)
             if send_at <= time.time() + 30:
                 return self.send_json({"error": "这个时间已经过了，请选今天稍后的时间"}, 400)
-        ids, scheduled = create_messages(classes, text, sender, body.get("voice"), body.get("urgent"),
-                                         body.get("defer"), body.get("voice_name"), who=str(body.get("who") or "")[:40] or None,
+        ids, scheduled = self.create_msg(classes, text, sender, voice=body.get("voice"), urgent=body.get("urgent"),
+                                         defer=body.get("defer"), voice_name=body.get("voice_name"), who=str(body.get("who") or "")[:40] or None,
                                          loud=body.get("loud"), send_at=send_at)
         self.send_json({"ok": True, "ids": ids, "scheduled": scheduled,
                         "exam": not body.get("urgent") and any(exam_now(c, send_at) for c in classes)})
 
     # ---------- 考试 ----------
+    def api_exam_audio_upload(self, q):
+        """上传考试听力音频（仅非公共模式）：校验 MP3 / WAV、上限 80MB、总容量与孤儿上限、二进制头合法与时长，多班共享只存一份"""
+        def fail(msg, code=400):
+            self.close_connection = True
+            return self.send_json({"error": msg}, code)
+        s = self.sess()
+        if not s:
+            return fail("请先登录", 401)
+        if PUBLIC:
+            return fail("公共服务器不支持上传考试听力", 403)
+        if not self.my_classes() and not is_admin(s):
+            return fail("你还没有加入任何班级", 403)
+        raw_name = os.path.basename((q.get("name") or [""])[0].replace("\\", "/")).strip()
+        raw_name = re.sub(r'[\x00-\x1f<>:"|?*]', "_", raw_name)
+        stem, dot, ext = raw_name.rpartition(".")
+        ext = ext.lower() if dot else ""
+        if ext not in EXAM_AUDIO_EXTS:
+            return fail("考试听力只支持 MP3 或 WAV 格式")
+        name = f"{(stem or '听力音频')[:75]}.{ext}"
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length <= 0:
+            return fail("音频文件是空的")
+        if length > EXAM_AUDIO_MAX:
+            return fail(f"音频文件太大了，上限 {EXAM_AUDIO_MAX // 1024 // 1024} MB", 413)
+        rep_aid = str((q.get("replace") or [""])[0] or "").strip()
+        err_msg, err_code = None, 400
+        with lock:
+            purge_exam_audio()
+            used_ids = ({x.get("audio_id") for e in exams for x in (e.get("sessions") or []) if x.get("audio_id")}
+                        | {t.get("audio_id") for t in listen_tasks if t.get("audio_id")})
+            # 替换旧临时音频时先不删旧文件（等新文件上传、校验、登记全成功后再删，避免坏文件把旧音频也弄丢）
+            can_rep = bool(rep_aid and rep_aid in exam_audios and rep_aid not in used_ids and exam_audios[rep_aid].get("uid") == s["uid"])
+            rep_sz = int(exam_audios[rep_aid].get("size") or 0) if can_rep else 0
+            total_sz = sum(int(x.get("size") or 0) for x in exam_audios.values()) - rep_sz
+            my_orphans = sum(1 for aid_, info_ in exam_audios.items() if info_.get("uid") == s["uid"] and aid_ not in used_ids) - (1 if can_rep else 0)
+            if total_sz + length > EXAM_AUDIO_TOTAL_MAX:
+                err_msg, err_code = "服务器听力缓存空间已满，请先删掉不用的旧听力后再传", 507
+            elif my_orphans >= EXAM_AUDIO_ORPHAN_MAX:
+                err_msg, err_code = "您有多个已上传但未保存的听力文件，请先完成保存或稍后再试", 429
+        if err_msg:
+            return fail(err_msg, err_code)
+        aid = secrets.token_hex(12)
+        os.makedirs(EXAM_AUDIO_DIR, exist_ok=True)
+        tmp = os.path.join(EXAM_AUDIO_DIR, f"{aid}.{ext}.part")
+        dst = os.path.join(EXAM_AUDIO_DIR, f"{aid}.{ext}")
+        h = hashlib.sha256()
+        moved = False
+        try:
+            left = length
+            with open(tmp, "wb") as fh:
+                while left > 0:
+                    chunk = self.rfile.read(min(left, 1024 * 1024))
+                    if not chunk:
+                        raise OSError("上传中断")
+                    fh.write(chunk)
+                    h.update(chunk)
+                    left -= len(chunk)
+            info = parse_audio_info(tmp, ext)
+            if not info:
+                return fail("无法识别该音频文件，请确认是有效的 MP3 或 WAV 音频")
+            os.replace(tmp, dst)
+            moved = True
+        except OSError:
+            return fail("上传中断了，请重试")
+        except Exception:
+            return fail("音频文件格式解析失败，请确认是有效的 MP3 或 WAV 音频")
+        finally:
+            if not moved:
+                try:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
+                except OSError:
+                    pass
+        rec = {"id": aid, "name": name, "ext": ext, "size": length, "sha256": h.hexdigest(),
+               "duration": info["duration"], "by": s["name"], "uid": s["uid"], "at": time.time(), "bound": False}
+        err_msg, err_code, old_path_del = None, 400, ""
+        with lock:
+            purge_exam_audio()
+            used_ids = ({x.get("audio_id") for e in exams for x in (e.get("sessions") or []) if x.get("audio_id")}
+                        | {t.get("audio_id") for t in listen_tasks if t.get("audio_id")})
+            can_rep = bool(rep_aid and rep_aid in exam_audios and rep_aid not in used_ids and exam_audios[rep_aid].get("uid") == s["uid"])
+            rep_sz = int(exam_audios[rep_aid].get("size") or 0) if can_rep else 0
+            total_sz = sum(int(x.get("size") or 0) for x in exam_audios.values()) - rep_sz
+            my_orphans = sum(1 for aid_, info_ in exam_audios.items() if info_.get("uid") == s["uid"] and aid_ not in used_ids) - (1 if can_rep else 0)
+            if total_sz + length > EXAM_AUDIO_TOTAL_MAX:
+                err_msg, err_code = "服务器听力缓存空间已满，请先删掉不用的旧听力后再传", 507
+            elif my_orphans >= EXAM_AUDIO_ORPHAN_MAX:
+                err_msg, err_code = "您有多个已上传但未保存的听力文件，请先完成保存或稍后再试", 429
+            else:
+                exam_audios[aid] = rec
+                if can_rep:
+                    old_info = exam_audios.pop(rep_aid, None)
+                    exam_audio_ready.pop(rep_aid, None)
+                    if old_info:
+                        old_path_del = os.path.join(EXAM_AUDIO_DIR, f"{rep_aid}.{old_info.get('ext', 'mp3')}")
+                write_json(EXAM_AUDIO_PATH, exam_audios)
+        if err_msg:
+            try:
+                if os.path.exists(dst):
+                    os.remove(dst)
+            except OSError:
+                pass
+            return fail(err_msg, err_code)
+        if old_path_del:
+            try:
+                if os.path.exists(old_path_del):
+                    os.remove(old_path_del)
+            except OSError:
+                pass
+        self.send_json({"ok": True, "audio": {"id": aid, "name": name, "ext": ext, "size": length,
+                                              "duration": info["duration"], "sha256": rec["sha256"][:12]}})
+
+    def api_exam_audio_status(self, body):
+        """一体机上报：预下载缓存就绪状态（audio_id + status/pct）和/或当前听力播放进度（exam_id/listen_id + play_state）"""
+        if PUBLIC:
+            return self.deny("public_forbid")
+        cls = str(body.get("class") or "")
+        if not cls or cls not in load_students():
+            return self.send_json({"error": "没有这个班"}, 404)
+        now = time.time()
+        last_seen[cls] = now
+        aid = str(body.get("audio_id") or "")[:40]
+        def safe_num(v, hi=86400.0):
+            try:
+                x = float(v if v is not None else 0)
+            except (TypeError, ValueError):
+                return 0.0
+            return min(hi, max(0.0, x)) if math.isfinite(x) else 0.0
+        with lock:
+            acap = body.get("acap")
+            if acap in (0, 1, 2):
+                screen_audio_cap[cls] = {"can_mp3": acap >= 2, "can_seek": acap >= 2, "can_wav": acap >= 1, "at": now}
+            if aid and aid in exam_audios and body.get("cache_status") in ("ready", "downloading", "error"):
+                used = (any(cls in e.get("classes", []) and any(x.get("audio_id") == aid for x in (e.get("sessions") or [])) for e in exams)
+                        or any(cls in t.get("classes", []) and t.get("audio_id") == aid for t in listen_tasks))
+                if used:
+                    exam_audio_ready.setdefault(aid, {})[cls] = {
+                        "status": body["cache_status"],
+                        "pct": int(safe_num(body.get("pct"), 100.0)),
+                        "at": now,
+                        "err": str(body.get("err") or "")[:120],
+                    }
+            if body.get("play_state") in ("idle", "playing", "paused", "stopped", "done", "testing", "error"):
+                lid = body.get("listen_id")
+                eid = body.get("exam_id")
+                idx = body.get("idx")
+                key = ""
+                if type(lid) is int:
+                    if any(t["id"] == lid and cls in t.get("classes", []) for t in listen_tasks):
+                        key = f"listen|{lid}|{cls}"
+                elif type(eid) is int and type(idx) is int:
+                    if any(e["id"] == eid and cls in e.get("classes", []) and 0 <= idx < len(e.get("sessions") or []) for e in exams):
+                        key = f"{eid}|{idx}|{cls}"
+                if key:
+                    if body["play_state"] in ("idle", "stopped", "done"):
+                        exam_audio_play.pop(key, None)
+                    else:
+                        exam_audio_play[key] = {
+                            "state": body["play_state"],
+                            "pos": safe_num(body.get("pos")),
+                            "dur": safe_num(body.get("dur")),
+                            "audio_id": aid,
+                            "err": str(body.get("play_err") or body.get("err") or "")[:80],
+                            "at": now,
+                        }
+        self.send_json({"ok": True})
+
+    def api_listen_save(self, body, sender):
+        """课堂 -> 播放听力：保存平时听力任务（传好立即触发一体机后台预下载）"""
+        if PUBLIC:
+            return self.deny("public_forbid")
+        s = self.sess()
+        students = load_students()
+        raw_cs = body.get("classes") if isinstance(body.get("classes"), list) else ([body.get("class")] if body.get("class") else [])
+        classes = list(dict.fromkeys(str(c).strip() for c in raw_cs if str(c or "").strip() in students))
+        if not classes:
+            return self.send_json({"error": "请选择班级"}, 400)
+        aid = str(body.get("audio_id") or "").strip()
+        if not aid:
+            return self.send_json({"error": "请先上传听力音频（MP3 或 WAV）"}, 400)
+        play_at = str(body.get("play_at") or "").strip()
+        if play_at:
+            if not re.fullmatch(r"\d{2}:\d{2}", play_at) or not re_hm(play_at):
+                return self.send_json({"error": "定时播放时间格式不对"}, 400)
+            play_ts = datetime.combine(now_cn().date(), datetime.strptime(play_at, "%H:%M").time(), CN).timestamp()
+            if play_ts <= time.time() + 30:
+                return self.send_json({"error": "这个时间已经过了，请选今天稍后的时间"}, 400)
+        err_kind, err_msg, item = None, None, None
+        with lock:
+            a = exam_audios.get(aid)
+            if not a:
+                err_kind, err_msg = 400, "音频文件不存在或已过期，请重新上传"
+            elif not (is_admin(s) or a.get("uid") == s["uid"]):
+                err_kind = "own"
+            else:
+                a["bound"] = True
+                default_title = os.path.splitext(a["name"])[0]
+                title = re.sub(r"\s+", " ", str(body.get("title") or default_title)).strip()[:36] or "英语听力"
+                item = {"id": next_id(listen_tasks), "title": title, "classes": classes, "audio_id": aid,
+                        "date": today(), "play_at": play_at, "creator": sender, "uid": s["uid"], "created": time.time()}
+                listen_tasks.append(item)
+                purge_exam_audio()
+                write_json(EXAM_AUDIO_PATH, exam_audios)
+                write_json(LISTEN_PATH, listen_tasks)
+                exam_rev[0] = time.time()  # 通知一体机 2 秒内拉新看板开始后台静默缓存
+        if err_kind == "own":
+            return self.deny("own")
+        if err_kind:
+            return self.send_json({"error": err_msg}, err_kind)
+        self.send_json({"ok": True, "item": item})
+
+    def api_listen_delete(self, body, sender):
+        if PUBLIC:
+            return self.deny("public_forbid")
+        tid = body.get("id")
+        with lock:
+            listen_tasks[:] = [t for t in listen_tasks if t["id"] != tid]
+            for k in [k for k in exam_audio_play if k.startswith(f"listen|{tid}|")]:
+                exam_audio_play.pop(k, None)
+            purge_exam_audio()
+            write_json(LISTEN_PATH, listen_tasks)
+            exam_rev[0] = time.time()
+        self.send_json({"ok": True})
+
+    def api_listen_cmd(self, body, sender):
+        """课堂 -> 播放听力控制指令：test（10 秒试音）、play（立即同步播放，大屏浮条不挡课件）、stop（停止）"""
+        if PUBLIC:
+            return self.deny("public_forbid")
+        action = str(body.get("action") or "")
+        if action not in ("test", "play", "stop"):
+            return self.send_json({"error": "不支持的操作"}, 400)
+        raw_cs = body.get("classes") if isinstance(body.get("classes"), list) else ([body.get("class")] if body.get("class") else [])
+        tid = body.get("id")
+        if type(tid) is not int:
+            return self.send_json({"error": "找不到这条听力任务"}, 404)
+        err_code, err_msg, targets, payload, on_cnt, start_at = None, None, [], None, 0, 0
+        with lock:
+            t = next((x for x in listen_tasks if x["id"] == tid), None)
+            if not t:
+                err_code, err_msg = 404, "找不到这条听力任务"
+            else:
+                aid = t.get("audio_id") or ""
+                a = exam_audios.get(aid)
+                if action == "play" and not a:
+                    err_code, err_msg = 400, "音频文件不存在或已过期"
+                else:
+                    targets = list(dict.fromkeys(str(c).strip() for c in raw_cs if str(c or "").strip() in t["classes"]))
+                    if not targets:
+                        err_code, err_msg = 400, "请至少选择一个目标班级"
+                    else:
+                        now = time.time()
+                        start_at = now + 2.5 if action == "play" else now
+                        payload = {"cmd_id": secrets.token_hex(6), "mode": "listen", "action": action, "listen_id": t["id"],
+                                   "title": t["title"], "audio_id": aid, "duration": a["duration"] if a else 0,
+                                   "sha256": a["sha256"] if a else "", "ext": a["ext"] if a else "mp3",
+                                   "url": f"/exam-audio/{aid}" if aid else "", "start_at": start_at}
+                        on_cnt = sum(1 for c in targets if now - last_seen.get(c, 0) < 15)
+        if err_code:
+            return self.send_json({"error": err_msg}, err_code)
+        self.create_msg(targets, f"课堂听力控制：{action}", sender, kind="exam_audio", urgent=True,
+                        data=payload, expire_at=time.time() + 90)
+        self.send_json({"ok": True, "count": len(targets), "online_count": on_cnt, "start_at": start_at})
+
+    def api_exam_audio_cmd(self, body, sender):
+        """工作台对选中班级发送听力控制指令：test（10 秒考前试音）、play（立即同步开播）、stop（停止播放）"""
+        if PUBLIC:
+            return self.deny("public_forbid")
+        action = str(body.get("action") or "")
+        if action not in ("test", "play", "stop"):
+            return self.send_json({"error": "不支持的操作"}, 400)
+        raw_cs = body.get("classes") if isinstance(body.get("classes"), list) else ([body.get("class")] if body.get("class") else [])
+        eid, idx = body.get("exam_id"), body.get("idx")
+        if type(eid) is not int or type(idx) is not int:
+            return self.send_json({"error": "找不到这场考试"}, 404)
+        err_code, err_msg, targets, payload, on_cnt, start_at = None, None, [], None, 0, 0
+        with lock:
+            e = next((x for x in exams if x["id"] == eid), None)
+            if not e or not 0 <= idx < len(e["sessions"]):
+                err_code, err_msg = 404, "找不到这场考试"
+            else:
+                sess = e["sessions"][idx]
+                aid = sess.get("audio_id") or ""
+                a = exam_audios.get(aid) if aid else None
+                if action == "play" and not a:
+                    err_code, err_msg = 400, "这一场考试还没有上传听力音频"
+                else:
+                    targets = list(dict.fromkeys(str(c).strip() for c in raw_cs if str(c or "").strip() in e["classes"]))
+                    if not targets:
+                        err_code, err_msg = 400, "请至少选择一个参加本场考试的班级"
+                    else:
+                        now = time.time()
+                        # 统一锚定 2.5 秒后的服务器时间戳，让多班一体机按服务器对时误差 < 1 秒同步起播
+                        start_at = now + 2.5 if action == "play" else now
+                        cmd_id = secrets.token_hex(6)
+                        payload = {"cmd_id": cmd_id, "action": action, "exam_id": e["id"], "idx": idx,
+                                   "exam_key": f"{e['id']}-{idx}", "title": f"{sess['subject']}听力",
+                                   "audio_id": aid, "ext": a["ext"] if a else "mp3",
+                                   "sha256": a["sha256"] if a else "", "duration": a["duration"] if a else 0,
+                                   "url": f"/exam-audio/{aid}" if a else "", "start_at": start_at}
+                        on_cnt = sum(1 for c in targets if now - last_seen.get(c, 0) < 15)
+        if err_code:
+            return self.send_json({"error": err_msg}, err_code)
+        self.create_msg(targets, f"考试听力控制：{action}", sender, kind="exam_audio", urgent=True,
+                        data=payload, expire_at=time.time() + 90)
+        self.send_json({"ok": True, "count": len(targets), "online_count": on_cnt, "start_at": start_at})
+
     def api_exam_save(self, body, sender):
         name = re.sub(r"\s+", " ", str(body.get("name") or "")).strip()[:30]
-        classes = list(dict.fromkeys(str(c) for c in body.get("classes") or [] if str(c) in load_students()))
+        classes = list(dict.fromkeys(str(c) for c in (body.get("classes") if isinstance(body.get("classes"), list) else []) if str(c) in load_students()))
         notice = "\n".join(l.strip()[:60] for l in str(body.get("notice") or "").split("\n") if l.strip())[:600]
+        raw_sessions = body.get("sessions") if isinstance(body.get("sessions"), list) else []
         sessions = []
-        for x in (body.get("sessions") or [])[:30]:
+        hm_min = lambda t: int(t[:2]) * 60 + int(t[3:5])
+        for x in raw_sessions[:30]:
+            if not isinstance(x, dict):
+                return self.send_json({"error": "场次参数格式不对"}, 400)
             subj, date, a, b = (str(x.get(k) or "").strip() for k in ("subject", "date", "start", "end"))
             if not subj and not a and not b:
                 continue
-            if not subj or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) or not re.fullmatch(r"\d{2}:\d{2}", a) or not re.fullmatch(r"\d{2}:\d{2}", b):
+            if not subj or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) or not re_hm(a) or not re_hm(b):
                 return self.send_json({"error": "每一场都要填科目、日期、开始和结束时间"}, 400)
+            try:
+                datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                return self.send_json({"error": f"{subj}：日期格式不对"}, 400)
             if a >= b:
                 return self.send_json({"error": f"{subj}：结束时间要晚于开始时间"}, 400)
-            sessions.append({"subject": subj[:10], "date": date, "start": a, "end": b})
+            row = {"subject": subj[:10], "date": date, "start": a, "end": b}
+            aid = str(x.get("audio_id") or "").strip()
+            if aid:
+                if PUBLIC:
+                    return self.deny("public_forbid")
+                astart = str(x.get("audio_start") or "").strip() or a
+                if not re.fullmatch(r"\d{2}:\d{2}", astart) or not re_hm(astart):
+                    return self.send_json({"error": f"{subj}：听力起播时间格式不对"}, 400)
+                if hm_min(astart) < hm_min(a) - EXAM_AUDIO_EARLY_MAX:
+                    return self.send_json({"error": f"{subj}：听力起播时间最多只能早于开考 {EXAM_AUDIO_EARLY_MAX} 分钟"}, 400)
+                if hm_min(astart) >= hm_min(b):
+                    return self.send_json({"error": f"{subj}：听力起播时间要早于考试结束时间"}, 400)
+                row["audio_id"] = aid
+                row["audio_start"] = astart
+            sessions.append(row)
         if not name:
             return self.send_json({"error": "请填写考试名称，如：10 月月考"}, 400)
         if not classes:
             return self.send_json({"error": "请选择参加考试的班级"}, 400)
+        err = self.multi_class_denied(classes)
+        if err:
+            return self.send_json({"error": err}, 403)
         if not sessions:
             return self.send_json({"error": "至少填一场考试"}, 400)
-        keyed = sorted((x["date"], x["start"], x["end"], x["subject"]) for x in sessions)
+        keyed = sorted(sessions, key=lambda x: (x["date"], x["start"], x["end"]))
         for p_, n_ in zip(keyed, keyed[1:]):
-            if p_[0] == n_[0] and n_[1] < p_[2]:
-                return self.send_json({"error": f"{p_[3]} 和 {n_[3]} 的时间重叠了"}, 400)
+            if p_["date"] == n_["date"]:
+                if n_["start"] < p_["end"]:
+                    return self.send_json({"error": f"{p_['subject']} 和 {n_['subject']} 的时间重叠了"}, 400)
+                if n_.get("audio_id") and n_.get("audio_start") and n_["audio_start"] < p_["end"]:
+                    return self.send_json({"error": f"{n_['subject']}听力起播时间（{n_['audio_start']}）早于前一场{p_['subject']}结束时间（{p_['end']}），会冲突"}, 400)
+        s_cur = self.sess()
+        err_kind, err_msg, item = None, None, None
         with lock:
-            old = next((e for e in exams if e["id"] == body.get("id")), None)
-            for e in exams:  # 同一个班不能同时有两场考试
-                if e is old:
-                    continue
-                for c in set(classes) & set(e["classes"]):
-                    for x in e["sessions"]:
-                        for y in sessions:
-                            if x["date"] == y["date"] and x["start"] < y["end"] and y["start"] < x["end"]:
-                                return self.send_json({"error": f"{c}在{e['name']}里已经有 {x['date'][5:]} {x['start']}–{x['end']} 的{x['subject']}，时间重叠了"}, 400)
-            if old:
-                changed = {i for i, x in enumerate(old["sessions"]) if i >= len(sessions) or x != sessions[i]}
-                old.update(name=name, classes=classes, sessions=sessions, notice=notice,
-                           ended={k: v for k, v in (old.get("ended") or {}).items() if int(k.split("|")[1]) not in changed})
-                item = old
-            else:
-                item = {"id": next_id(exams), "name": name, "classes": classes, "sessions": sessions, "notice": notice,
-                        "creator": sender, "uid": self.sess()["uid"], "created": time.time(), "ended": {}}
-                exams.append(item)
-            cutoff = (now_cn() - timedelta(days=60)).strftime("%Y-%m-%d")
-            exams[:] = [e for e in exams if max(x["date"] for x in e["sessions"]) >= cutoff]
-            save_exams()
+            old_idx = next((idx_ for idx_, e in enumerate(exams) if e["id"] == body.get("id")), None)
+            old = exams[old_idx] if old_idx is not None else None
+            old_aids = {x.get("audio_id") for x in (old.get("sessions") or []) if x.get("audio_id")} if old else set()
+            bound_recs = []
+            for x in sessions:
+                aid = x.get("audio_id")
+                if aid:
+                    a_rec = exam_audios.get(aid)
+                    if not a_rec:
+                        err_kind, err_msg = 400, f"{x['subject']}：听力音频不存在或已过期，请重新上传"
+                        break
+                    if not (is_admin(s_cur) or a_rec.get("uid") == s_cur["uid"] or aid in old_aids):
+                        err_kind = "own"
+                        break
+                    bound_recs.append(a_rec)
+            if not err_kind:
+                for e in exams:  # 同一个班不能同时有两场考试
+                    if e is old:
+                        continue
+                    for c in set(classes) & set(e["classes"]):
+                        for x in e["sessions"]:
+                            for y in sessions:
+                                if x["date"] != y["date"]:
+                                    continue
+                                if x["start"] < y["end"] and y["start"] < x["end"]:
+                                    err_kind, err_msg = 400, f"{c}在{e['name']}里已经有 {x['date'][5:]} {x['start']}–{x['end']} 的{x['subject']}，时间重叠了"
+                                    break
+                                xs = min(x["start"], x["audio_start"]) if (x.get("audio_id") and x.get("audio_start")) else x["start"]
+                                ys = min(y["start"], y["audio_start"]) if (y.get("audio_id") and y.get("audio_start")) else y["start"]
+                                if xs < y["end"] and ys < x["end"]:
+                                    err_kind, err_msg = 400, f"{c}在{e['name']}里 {x['date'][5:]} {xs}–{x['end']} 的{x['subject']}与{y['subject']}（{ys}–{y['end']}）听力/考试时段冲突"
+                                    break
+                            if err_kind:
+                                break
+                        if err_kind:
+                            break
+                    if err_kind:
+                        break
+            if not err_kind:
+                for a_rec in bound_recs:
+                    a_rec["bound"] = True
+                if old is not None:
+                    changed = {i for i, x in enumerate(old["sessions"]) if i >= len(sessions) or x != sessions[i]}
+                    new_ended = {k: v for k, v in (old.get("ended") or {}).items() if int(k.rsplit("|", 1)[1]) not in changed}
+                    # 构造新 dict 替换，避免并发读 exam_sessions() 读到半更新的 sessions 列表
+                    item = {**old, "name": name, "classes": classes, "sessions": sessions, "notice": notice, "ended": new_ended}
+                    exams[old_idx] = item
+                else:
+                    item = {"id": next_id(exams), "name": name, "classes": classes, "sessions": sessions, "notice": notice,
+                            "creator": sender, "uid": s_cur["uid"], "created": time.time(), "ended": {}}
+                    exams.append(item)
+                cutoff = (now_cn() - timedelta(days=60)).strftime("%Y-%m-%d")
+                exams[:] = [e for e in exams if max(x["date"] for x in e["sessions"]) >= cutoff]
+                if bound_recs:
+                    write_json(EXAM_AUDIO_PATH, exam_audios)
+                purge_exam_audio()
+                save_exams()
+        if err_kind == "own":
+            return self.deny("own")
+        if err_kind:
+            return self.send_json({"error": err_msg}, err_kind)
         self.send_json({"ok": True, "item": item})
 
     def api_exam_delete(self, body, sender):
+        eid = body.get("id")
         with lock:
-            exams[:] = [e for e in exams if e["id"] != body.get("id")]
+            exams[:] = [e for e in exams if e["id"] != eid]
+            for k in [k for k in exam_audio_play if k.startswith(f"{eid}|")]:
+                exam_audio_play.pop(k, None)
+            purge_exam_audio()
             save_exams()
         self.send_json({"ok": True})
 
     def api_exam_end(self, body, sender):
         """提前结束这个班正在显示的这一场（大屏马上收起）"""
         cls = str(body.get("class") or "")
+        i = body.get("idx")
+        not_found = False
         with lock:
             e = next((e for e in exams if e["id"] == body.get("id") and cls in e["classes"]), None)
-            i = body.get("idx")
-            if not e or not isinstance(i, int) or not 0 <= i < len(e["sessions"]):
-                return self.send_json({"error": "找不到这场考试"}, 404)
-            e.setdefault("ended", {})[f"{cls}|{i}"] = time.time()
-            save_exams()
+            if not e or type(i) is not int or not 0 <= i < len(e["sessions"]):
+                not_found = True
+            else:
+                e["ended"] = {**(e.get("ended") or {}), f"{cls}|{i}": time.time()}
+                exam_audio_play.pop(f"{e['id']}|{i}|{cls}", None)
+                save_exams()
+        if not_found:
+            return self.send_json({"error": "找不到这场考试"}, 404)
         self.send_json({"ok": True})
 
     # ---------- 作业 ----------
     def api_homework_add(self, body, sender):
-        cls = str(body.get("class") or "")
+        raw_cs = body.get("classes") if isinstance(body.get("classes"), list) else ([body.get("class")] if body.get("class") else [])
+        students = load_students()
+        classes = list(dict.fromkeys(str(c).strip() for c in raw_cs if str(c or "").strip() in students))
         subject = str(body.get("subject") or "").strip()[:10]
         content = str(body.get("content") or "").strip()[:TEXT_LIMIT if PUBLIC else 300]
-        if not cls or not subject or not content:
+        if not classes:
+            return self.send_json({"error": "请选择班级"}, 400)
+        err = self.multi_class_denied(classes)
+        if err:
+            return self.send_json({"error": err}, 403)
+        if not subject or not content:
             return self.send_json({"error": "请填写科目和作业内容"}, 400)
-        minutes = max(0, min(300, int(body.get("minutes") or 0)))
+        try:
+            minutes = max(0, min(300, int(body.get("minutes") or 0)))
+        except (TypeError, ValueError):
+            minutes = 0
         due = str(body.get("due") or "").strip()[:20]
+        d_today, now = today(), time.time()
+        added = []
         with lock:
-            item = {"id": next_id(homework), "class": cls, "subject": subject, "content": content,
-                    "minutes": minutes, "due": due, "date": today(), "teacher": sender, "created": time.time()}
-            item["due_date"] = due_date(item)
-            homework.append(item)
+            nid = next_id(homework)
+            for cls in classes:
+                item = {"id": nid, "class": cls, "subject": subject, "content": content,
+                        "minutes": minutes, "due": due, "date": d_today, "teacher": sender, "created": now}
+                item["due_date"] = due_date(item)
+                homework.append(item)
+                added.append(item)
+                nid += 1
             cutoff = (now_cn() - timedelta(days=200)).strftime("%Y-%m-%d")  # 保留一学期多，方便期末导出
             homework[:] = [h for h in homework if h["date"] >= cutoff]
             write_json(HOMEWORK_PATH, homework)
+        msg_ids = []
         if body.get("push"):
             text = f"【{subject}作业】{content}" + (f"\n预计 {minutes} 分钟" if minutes else "") + (f" · {due}" if due else "")
-            create_messages([cls], text, sender, body.get("voice"), False, True, body.get("voice_name"),
-                            kind="homework", say=f"{subject}作业：{content}", repeat=1)
-        self.send_json({"ok": True, "item": item})
+            msg_ids, _ = self.create_msg(classes, text, sender, voice=body.get("voice"), urgent=False, defer=True, voice_name=body.get("voice_name"),
+                                         kind="homework", say=f"{subject}作业：{content}", repeat=1)
+        self.send_json({"ok": True, "item": added[0], "items": added, "count": len(added), "msg_ids": msg_ids})
 
     def api_homework_edit(self, body, sender):
         subject = str(body.get("subject") or "").strip()[:10]
@@ -2663,8 +3932,8 @@ class Handler(BaseHTTPRequestHandler):
         text = homework_summary(cls)
         if not text:
             return self.send_json({"error": "今天还没有布置作业"}, 400)
-        create_messages([cls], text, sender, body.get("voice"), body.get("urgent"), body.get("defer"),
-                        body.get("voice_name"), kind="homework", say="今日作业已发布，请同学们抄写", repeat=1)
+        self.create_msg([cls], text, sender, voice=body.get("voice"), urgent=body.get("urgent"), defer=body.get("defer"),
+                        voice_name=body.get("voice_name"), kind="homework", say="今日作业已发布，请同学们抄写", repeat=1)
         self.send_json({"ok": True})
 
     # ---------- 定时提醒 ----------
@@ -2676,16 +3945,19 @@ class Handler(BaseHTTPRequestHandler):
         classes = list(dict.fromkeys(str(c).strip() for c in body.get("classes") or [] if str(c or "").strip() in students))
         if not text or not re_hm(hm) or not days or not classes:
             return self.send_json({"error": "请填写时间、重复日期和提醒内容"}, 400)
-        if PUBLIC and len(classes) > 1:
-            return self.send_json({"error": "公共服务器不支持多班群发"}, 403)
+        err = self.multi_class_denied(classes)
+        if err:
+            return self.send_json({"error": err}, 403)
         with lock:
             r = next((x for x in reminders if x["id"] == body.get("id")), None)
             full = [c for c in classes if sum(c in x["classes"] for x in reminders if x is not r) >= REMINDER_LIMIT]
             if PUBLIC and full:
                 return self.send_json({"error": f"{full[0]}的定时提醒已经有 {REMINDER_LIMIT} 条了，请先删掉一些"}, 400)
             if not r:
-                r = {"id": next_id(reminders), "creator": sender}
+                r = {"id": next_id(reminders), "creator": sender, "uid": self.sess()["uid"]}
                 reminders.append(r)
+            elif not r.get("uid") and r.get("creator") == sender:
+                r["uid"] = self.sess()["uid"]
             r.update({"text": text, "time": hm, "days": days, "classes": classes,
                       "voice": bool(body.get("voice")), "urgent": bool(body.get("urgent")),
                       "voice_name": body.get("voice_name"), "enabled": body.get("enabled", True) is not False})
@@ -2795,7 +4067,7 @@ class Handler(BaseHTTPRequestHandler):
         label = str(body.get("label") or "").strip()[:30]
         mins, secs = divmod(seconds, 60)
         text = f"{label or '计时'} {mins} 分钟" + (f" {secs} 秒" if secs else "")
-        ids, _ = create_messages([cls], text, sender, kind="timer", urgent=True,
+        ids, _ = self.create_msg([cls], text, sender, kind="timer", urgent=True,
                                  data={"seconds": seconds, "end_at": end_at, "label": label},
                                  expire_at=end_at + 30)
         self.send_json({"ok": True, "id": ids[0], "end_at": end_at})
@@ -2811,7 +4083,7 @@ class Handler(BaseHTTPRequestHandler):
         recent.append(name)
         del recent[:-max(1, len(names) // 2)]
         text = f"请 {name} 同学回答"
-        ids, _ = create_messages([cls], text, sender, voice=body.get("voice", True), urgent=True,
+        ids, _ = self.create_msg([cls], text, sender, voice=body.get("voice", True), urgent=True,
                                  voice_name=body.get("voice_name"), kind="pick",
                                  data={"name": name, "names": names}, expire_at=time.time() + 600,
                                  say=f"请{name}同学回答", repeat=1)
@@ -2842,8 +4114,8 @@ class Handler(BaseHTTPRequestHandler):
         hw = next((h for h in homework if h["id"] == body.get("hw_id") and h["class"] == cls), None)
         if not hw:
             return self.send_json({"error": "找不到这项作业"}, 400)
-        create_messages([cls], f"【{hw['subject']}作业】收交登记\n请{hw['subject']}课代表点击下方按钮开始登记", sender,
-                        False, False, body.get("defer", True), kind="collect",
+        self.create_msg([cls], f"【{hw['subject']}作业】收交登记\n请{hw['subject']}课代表点击下方按钮开始登记", sender,
+                        voice=False, urgent=False, defer=body.get("defer", True), kind="collect",
                         data={"hw_id": hw["id"], "subject": hw["subject"]}, expire_at=time.time() + 3 * 3600)
         self.send_json({"ok": True})
 
@@ -2854,7 +4126,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"error": "没有未交的同学"}, 400)
         names = "、".join(rec["missing"])
         text = f"请以下同学尽快补交{rec['subject']}作业：\n{names}"
-        create_messages([cls], text, sender, body.get("voice"), False, body.get("defer", True), body.get("voice_name"),
+        self.create_msg([cls], text, sender, voice=body.get("voice"), urgent=False, defer=body.get("defer", True), voice_name=body.get("voice_name"),
                         kind="call", say=f"请{names}同学尽快补交{rec['subject']}作业", repeat=1)
         self.send_json({"ok": True})
 
@@ -2892,8 +4164,9 @@ class Handler(BaseHTTPRequestHandler):
         classes = list(dict.fromkeys(str(c).strip() for c in raw_cs if str(c or "").strip() in students))
         if not classes:
             return self.send_json({"error": "请选择班级"}, 400)
-        if PUBLIC and len(classes) > 1:
-            return self.send_json({"error": "公共服务器不支持多班群发"}, 403)
+        err = self.multi_class_denied(classes)
+        if err:
+            return self.send_json({"error": err}, 403)
         name = os.path.basename(str(body.get("name") or "").replace("\\", "/")).strip()
         name = re.sub(r'[\x00-\x1f<>:"|?*]', "_", name)[:80]
         ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
@@ -2949,8 +4222,9 @@ class Handler(BaseHTTPRequestHandler):
             classes = list(dict.fromkeys(resolve_class(c) for c in raw_cs if c and resolve_class(c) in students))
         if not classes or not all(self.allowed(c, "teacher") for c in classes):
             return fail("你不是这个班的老师", 403)
-        if PUBLIC and len(classes) > 1:
-            return fail("公共服务器不支持多班群发", 403)
+        err = self.multi_class_denied(classes)
+        if err:
+            return fail(err, 403)
         name = os.path.basename((q.get("name") or [""])[0].replace("\\", "/")).strip()
         name = re.sub(r'[\x00-\x1f<>:"|?*]', "_", name)[:80]
         ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
@@ -2978,6 +4252,12 @@ class Handler(BaseHTTPRequestHandler):
                     ok_cls.append(c)
             if not ok_cls:
                 return fail(f"所选班级的文件空间都已满 {FILE_CLASS_MAX // 1024 // 1024}MB，请先删掉一些旧文件", 507)
+            if PUBLIC and not is_admin(s):
+                now_rl = time.time()
+                log = send_log[s["uid"]] = [t for t in send_log.get(s["uid"], []) if now_rl - t < 3600]
+                if len(log) + len(ok_cls) > SEND_LIMIT:
+                    return fail("发送太频繁，请稍后再试", 429)
+                log.extend([now_rl] * len(ok_cls))
         first_fid = secrets.token_hex(12)
         tmp = os.path.join(FILE_DIR, first_fid + ".part")
         created_paths = []
@@ -3022,7 +4302,7 @@ class Handler(BaseHTTPRequestHandler):
                 files.append(rec)
             write_json(FILE_PATH, files)
         size = f"{length / 1024 / 1024:.1f}MB" if length >= 1024 * 1024 else f"{max(1, length // 1024)}KB"
-        ids, _ = create_messages([c for c, _, _ in entries], f"发来文件：{name}", s["name"], kind="file",
+        ids, _ = self.create_msg([c for c, _, _ in entries], f"发来文件：{name}", s["name"], kind="file",
                                  data_by_class={c: {"file": fid, "name": name, "size": size} for c, fid, _ in entries})
         fids = [fid for _, fid, _ in entries]
         self.send_json({"ok": True, "id": fids[0], "ids": fids, "msg_id": ids[0], "msg_ids": ids,
@@ -3045,7 +4325,7 @@ class Handler(BaseHTTPRequestHandler):
         caption = str(body.get("caption") or "").strip()[:60]
         seconds = max(0, min(3600, int(body.get("seconds") or 0)))
         now = time.time()
-        ids, _ = create_messages([cls], caption or "请看大屏上的题目", sender, kind="image", urgent=True,
+        ids, _ = self.create_msg([cls], caption or "请看大屏上的题目", sender, kind="image", urgent=True,
                                  data={"img": img, "caption": caption, "seconds": seconds,
                                        "end_at": now + seconds if seconds else None},
                                  expire_at=now + max(seconds + 60, 7200))
@@ -3352,8 +4632,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def api_attend_start(self, body, sender):
         cls = str(body.get("class") or "")
-        create_messages([cls], "考勤登记\n请班长点击下方按钮，登记" + current_session(cls=cls) + "的考勤", sender,
-                        False, False, body.get("defer", True), kind="attend", data={"open": "attend"},
+        self.create_msg([cls], "考勤登记\n请班长点击下方按钮，登记" + current_session(cls=cls) + "的考勤", sender,
+                        voice=False, urgent=False, defer=body.get("defer", True), kind="attend", data={"open": "attend"},
                         expire_at=time.time() + 3 * 3600)
         self.send_json({"ok": True})
 
@@ -3384,7 +4664,7 @@ class Handler(BaseHTTPRequestHandler):
         if body.get("praise") and delta > 0:  # 只有加分才会上大屏表扬
             who = "、".join(names) if len(names) <= 6 else "、".join(names[:6]) + f" 等 {len(names)} 位同学"
             text = f"表扬 {who}\n{reason or '表现优秀'} +{delta}"
-            create_messages([cls], text, sender, body.get("voice"), False, True, body.get("voice_name"),
+            self.create_msg([cls], text, sender, voice=body.get("voice"), urgent=False, defer=True, voice_name=body.get("voice_name"),
                             kind="praise", say=f"表扬{'、'.join(names[:6])}同学，{reason or '表现优秀'}", repeat=1)
         self.send_json({"ok": True})
 
@@ -3398,8 +4678,8 @@ class Handler(BaseHTTPRequestHandler):
         cls = str(body.get("class") or "")
         if not duty_today(cls):
             return self.send_json({"error": "今天没有安排值日"}, 400)
-        create_messages([cls], "今日值日：" + duty_text(cls), sender, body.get("voice"), False, body.get("defer", True),
-                        body.get("voice_name"), kind="reminder", say="今日值日：" + duty_text(cls), repeat=1)
+        self.create_msg([cls], "今日值日：" + duty_text(cls), sender, voice=body.get("voice"), urgent=False, defer=body.get("defer", True),
+                        voice_name=body.get("voice_name"), kind="reminder", say="今日值日：" + duty_text(cls), repeat=1)
         self.send_json({"ok": True})
 
     # ---------- 大屏设置 ----------
@@ -3474,7 +4754,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def api_recall(self, body):
         raw = body.get("ids") if isinstance(body.get("ids"), list) else [body.get("id")]
-        ids = set(raw)
+        ids = {i for i in raw if type(i) is int}
         with lock:
             for m in messages:
                 if m["id"] in ids:
@@ -3496,20 +4776,27 @@ class Handler(BaseHTTPRequestHandler):
         st = period_status(cls=cls)
         out, changed = [], False
         rv = (q.get("rv") or ["0"])[0]
-        rv = int(rv) if rv.isdigit() else 0  # 接收端版本：3 起认得远程卸载
+        rv = int(rv) if (rv.isascii() and rv.isdigit()) else 0  # 接收端版本：3 远程卸载，4 文件，5 听力，6 可靠 ack 控制指令
+        acap_s = (q.get("acap") or [""])[0]
         in_exam = exam_now(cls, now)
         with lock:
+            screen_rv[cls] = {"rv": rv, "at": now}
+            if acap_s in ("0", "1", "2"):
+                av = int(acap_s)
+                screen_audio_cap[cls] = {"can_mp3": av >= 2, "can_seek": av >= 2, "can_wav": av >= 1, "at": now}
             for m in messages:
                 if m["class"] != cls or msg_status(m, now) not in ("pending", "delivered"):
                     continue
-                if in_exam and not m["urgent"] and m.get("kind") not in ("uninstall", "standby"):
+                if in_exam and not m["urgent"] and m.get("kind") not in ("uninstall", "standby", "exam_audio"):
                     continue  # 考试期间先不显示（考完还没过期的会再弹出来）
                 if m.get("kind") == "file" and rv < 4:  # 旧版接收端不会下载文件：等它 10 分钟内自动更新后再发
                     continue
-                if m.get("kind") == "uninstall":
-                    if rv < 3:  # 旧版接收端不认识卸载指令（会当成普通消息弹出来）：等它 10 分钟内自动更新后再发
+                if m.get("kind") == "exam_audio":
+                    if PUBLIC or rv < 6:  # 公共模式彻底拦截；旧版接收端（rv<6）不支持可靠回执，等其自动升级后再发，绝不提前确认
                         continue
-                    m["acked_at"] = now  # 只发一次：卸载后重新安装的接收端不会再收到
+                if m.get("kind") == "uninstall":
+                    if rv < 6:  # 旧版接收端（rv<6）不支持卸载可靠回执，绝不提前确认或提前解绑 MAC；保留任务等其自动升级后再下发
+                        continue
                 if not m["delivered_at"]:
                     m["delivered_at"] = now
                     changed = True
@@ -3561,23 +4848,49 @@ class Handler(BaseHTTPRequestHandler):
                         "morning": {"start": morning_window(cls)[0], "end": morning_window(cls)[1], "date": dt.strftime("%Y-%m-%d"),
                                     "items": [{"subject": m["subject"], "content": m["content"]} for m in morning_of(cls)]},
                         "exams": [{**x, "voice": exam_voice()} for x in exam_sessions(cls) if x["hide_at"] > time.time()],
+                        "listen_tasks": listen_tasks_for_board(cls),
+                        "exam_audio_prefetch": exam_audio_prefetch_for(cls),
                         "stars": sorted(([n, v] for n, v in point_totals(cls, week_start_ts(dt)).items() if v > 0),
                                         key=lambda x: -x[1])[:5] if cc["board_points"] else []})
 
     def api_ack(self, body):
+        mid = body.get("id")
+        now = time.time()
+        resp = {"ok": False, "status": "not_found", "cancelled": True}
         with lock:
-            for m in messages:
-                if m["id"] == body.get("id") and not m.get("acked_at"):
-                    m["acked_at"] = time.time()
-            save_messages()
-        self.send_json({"ok": True})
+            m = next((x for x in messages if type(mid) is int and x["id"] == mid), None)
+            if m:
+                if m.get("recalled"):
+                    # 管理员已先一步撤销：绝不标记确认、绝不解绑 MAC，并明确告知大屏放弃卸载
+                    resp = {"ok": True, "status": "cancelled", "cancelled": True}
+                elif m.get("acked_at"):
+                    # 幂等回执：前一次回执已落库但响应丢包时，重发回执返回同样成功结果，不重复解绑
+                    resp = {"ok": True, "status": "acked", "cancelled": False, "already_acked": True}
+                elif m.get("kind") == "uninstall" and m.get("expire_at") and now > m["expire_at"]:
+                    resp = {"ok": True, "status": "expired", "cancelled": True}
+                else:
+                    m["acked_at"] = now
+                    # 可靠卸载回执：只有在任务仍有效且未撤销时，才在此解绑 VOI MAC 并结案
+                    if m.get("kind") == "uninstall" and (m.get("data") or {}).get("unbind_mac"):
+                        cls = m["class"]
+                        drop = [mac_ for mac_, b_ in devices["bindings"].items() if resolve_class(b_.get("class") or "") == cls]
+                        for mac_ in drop:
+                            devices["bindings"].pop(mac_, None)
+                        if drop:
+                            save_devices()
+                    save_messages()
+                    resp = {"ok": True, "status": "acked", "cancelled": False}
+        self.send_json(resp)
 
     def api_recent(self, q=None):
+        s = self.sess()
+        cur_sid = self.sid()
+        admin = is_admin(s)
         mine = set(self.my_classes())
         qcls = ((q or {}).get("class") or [""])[0]
         now = time.time()
         with lock:
-            all_mine = [m for m in messages if m["class"] in mine]
+            all_mine = [m for m in messages if m["class"] in mine and m.get("kind") != "exam_audio"]
             top_all = list(reversed(all_mine[-40:]))
             if qcls and qcls in mine:
                 top_cls = list(reversed([m for m in all_mine if m["class"] == qcls][-40:]))
@@ -3585,19 +4898,27 @@ class Handler(BaseHTTPRequestHandler):
                 active = sorted(top_cls + [m for m in top_all if m["id"] not in seen], key=lambda m: m["created"], reverse=True)
             else:
                 active = top_all
-            recent = [{"id": m["id"], "class": m["class"], "text": m["text"], "sender": m["sender"],
-                       "time": datetime.fromtimestamp(m["created"], CN).strftime("%m-%d %H:%M"),
-                       "deliver": datetime.fromtimestamp(m["deliver_at"], CN).strftime("%H:%M"),
-                       "status": msg_status(m, now), "kind": m.get("kind", "call"), "who": m.get("who"),
-                       "ack_secs": int(m["acked_at"] - (m.get("delivered_at") or m["deliver_at"])) if m.get("acked_at") else None,
-                       "delivered_ago": int(now - m["delivered_at"]) if m.get("delivered_at") else None}
-                      for m in active]
+            recent = []
+            for m in active:
+                is_mine = self.is_msg_owner(m, s)
+                # 送达回执弹窗与提示音：严格只对“本账号在本登录设备主动发出”的消息触发，彻底杜绝串人
+                notify_mine = bool(s and m.get("sender_uid") == s["uid"] and m.get("sender_sid") and m.get("sender_sid") == cur_sid)
+                recent.append({
+                    "id": m["id"], "class": m["class"], "text": m["text"], "sender": m["sender"],
+                    "mine": is_mine, "notify_mine": notify_mine, "can_recall": bool(admin or is_mine),
+                    "time": datetime.fromtimestamp(m["created"], CN).strftime("%m-%d %H:%M"),
+                    "deliver": datetime.fromtimestamp(m["deliver_at"], CN).strftime("%H:%M"),
+                    "status": msg_status(m, now), "kind": m.get("kind", "call"), "who": m.get("who"),
+                    "ack_secs": int(m["acked_at"] - (m.get("delivered_at") or m["deliver_at"])) if m.get("acked_at") else None,
+                    "delivered_ago": int(now - m["delivered_at"]) if m.get("delivered_at") else None,
+                })
         online = {c: now - last_seen.get(c, 0) < 15 for c in mine}
-        st = period_status(cls=((q or {}).get("class") or [""])[0] or None)
+        safe_cls = qcls if (qcls and qcls in mine) else ""
+        st = period_status(cls=safe_cls or None)
         self.send_json({"messages": recent, "online": online, "period": st,
                         "now": now_cn().strftime("%H:%M"),
                         "exam": (lambda x: {"subject": x["subject"], "start": x["start"], "end": x["end"], "id": x["exam_id"], "idx": x["idx"]} if x else None)(
-                            exam_now(((q or {}).get("class") or [""])[0]))})
+                            exam_now(safe_cls) if safe_cls else None)})
 
 
 def re_hm(v):

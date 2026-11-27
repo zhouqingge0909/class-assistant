@@ -355,6 +355,58 @@
   .bc-preview { margin-top: 12px; padding: 12px 14px; border-radius: 14px; background: var(--soft); font-size: 14.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
   .bc-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; max-height: 120px; overflow-y: auto; }
   .bc-tags .tag { background: var(--acc-soft); color: var(--acc-ink); font-weight: 600; padding: 3px 10px; }
+  /* ---------- 快捷方式引导条与弹窗 ---------- */
+  .sc-tip { margin-bottom: 16px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 14px 18px;
+    border-radius: 18px; background: linear-gradient(95deg, #effbf5, #f5fcff); border: 1.5px solid #bfead7;
+    box-shadow: 0 4px 14px rgba(22, 165, 113, .08); }
+  .sc-tip .sc-ic { width: 38px; height: 38px; border-radius: 12px; background: var(--acc); color: #fff; display: grid; place-items: center; flex: none; font-size: 18px; }
+  .sc-tip .sc-txt { flex: 1 1 240px; min-width: 0; line-height: 1.55; }
+  .sc-tip .sc-txt b { font-size: 15px; color: #16302a; }
+  .sc-tip .sc-txt small { display: block; font-size: 13px; color: #54697d; margin-top: 2px; }
+  .sc-card { background: #f6fbf9; border: 1.5px solid #cdeedf; border-radius: 18px; padding: 14px 16px; text-align: left; margin: 12px 0; }
+  .sc-card.adm { background: #f5f9fe; border-color: #cfe0f5; }
+  .sc-card .sc-h { font-size: 13.5px; font-weight: 800; color: #16302a; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
+  .sc-card .sc-wx { font-size: 12.5px; color: #54697d; margin: 7px 2px 12px; line-height: 1.55; }
+  .sc-card .sc-div { border-top: 1px dashed #d6e9df; margin: 10px 0 12px; }
+  .sc-warn { margin-top: 10px; padding: 9px 12px; border-radius: 12px; background: #fff6e5; border: 1px solid #f7d99c; color: #8a5a00; font-size: 12.5px; line-height: 1.55; text-align: left; }
+  .sc-safe { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: #eef6ff; border: 1px solid #c9dff8; color: #1d4f80; font-size: 12.5px; line-height: 1.6; text-align: left; }
+  .btn.outline-acc { background: #fff; color: var(--acc-ink); border: 1.5px solid var(--acc); }
+  .qr-compact { display: flex; align-items: center; gap: 14px; background: var(--soft); border-radius: 16px; padding: 12px 14px; text-align: left; margin: 12px 0 4px; }
+  .qr-compact img { width: 88px; height: 88px; border-radius: 10px; background: #fff; padding: 3px; border: 1px solid var(--line); flex: none; }
+  /* ---------- 考试听力 ---------- */
+  .exrow-box { padding: 12px; border-radius: 16px; border: 1.5px solid #e7edf4; background: #fafcff; margin-bottom: 10px; }
+  .exrow-box.has-audio { border-color: #bdd6f2; background: #f4f8fe; }
+  .ex-audio-ed { margin-top: 10px; padding: 12px 14px; border-radius: 14px; background: #fff; border: 1px solid #cfe0f4; }
+  .ex-audio-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 12px; border-radius: 12px; background: #f2f9f6; border: 1px solid #c5ead9; }
+  .ex-audio-bar .fn { font-weight: 800; font-size: 13.5px; color: #17302a; word-break: break-all; }
+  .ex-audio-bar .fi { font-size: 12px; color: #4d7066; }
+  .ex-play-row { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #e2ecf6; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .ex-listen-panel { margin-top: 10px; border-radius: 16px; background: #f5f9fe; border: 1.5px solid #c6dcf4; padding: 13px 14px; }
+  .ex-cache-box { background: #fff; border-radius: 13px; padding: 11px 13px; border: 1px solid #d7e5f5; margin: 10px 0; }
+  .ex-cache-bar { height: 8px; border-radius: 99px; background: #eaf0f7; overflow: hidden; margin: 8px 0 10px; }
+  .ex-cache-bar > div { height: 100%; border-radius: 99px; background: linear-gradient(90deg, #16a571, #34d399); transition: width .3s; }
+  .r-chip { padding: 3px 10px; border-radius: 99px; font-size: 12.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; }
+  .r-chip.ok { background: #e7f7f0; color: #0f7a53; border: 1px solid #bfead7; }
+  .r-chip.dl { background: #eef6ff; color: #1d5fa7; border: 1px solid #c5def8; }
+  .r-chip.bad { background: #fff1f0; color: #cf2e2e; border: 1px solid #f7c7c4; }
+  .r-chip.pend { background: #f1f5f9; color: #64748b; border: 1px solid #dce3ec; }
+  .ex-ctrl-box { background: #fff; border-radius: 13px; padding: 12px 13px; border: 1px solid #d7e5f5; }
+  .ex-act-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 10px; margin-top: 10px; }
+  .ex-act-card { border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .ex-act-card .btn, .sc-card .btn, #bulkUnGo { white-space: normal; text-align: center; line-height: 1.35; }
+  .ex-act-card.test { background: #f3f8ff; border: 1px solid #cfe0f5; }
+  .ex-act-card.play { background: #effbf5; border: 1px solid #bfead7; }
+  .btn.soft-blue { background: #e8f2fc; color: #1d4f80; border: 1px solid #c7ddf5; }
+  .ex-playing-bar { margin-top: 10px; padding: 11px 14px; border-radius: 14px; background: linear-gradient(95deg, #102438, #183654);
+    color: #eaf2fb; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .ex-pulse { width: 9px; height: 9px; border-radius: 50%; background: #34d399; box-shadow: 0 0 0 4px rgba(52, 211, 153, .28); flex: none; }
+  /* ---------- 批量远程卸载 ---------- */
+  .bu-box { margin-top: 14px; border: 1.5px solid #f4c2c2 !important; background: #fffafa; }
+  .bu-box .chip.on { border-color: #ef5a5a; background: #ffeded; color: #b91c1c; box-shadow: none; }
+  .bu-pending { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: #fff7e6; border: 1px solid #f5d79b;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; color: #8a5a00; }
+  .btn.danger-solid { background: #dc2626; color: #fff; box-shadow: 0 6px 16px rgba(220, 38, 38, .22); }
+  .btn.danger-solid:disabled { opacity: .4; box-shadow: none; cursor: not-allowed; }
 </style>
 </head>
 <body data-view="call">
@@ -434,6 +486,12 @@
       <div id="schTip" class="card hidden" style="margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#fdf6ec;border:1px solid #ecd9b0">
         <div style="flex:1 1 220px;line-height:1.7"><b>请先在「大屏」栏目设置本班的作息时间</b><br><span style="color:var(--muted);font-size:14px">大屏要按作息判断上课还是下课：上课时消息只在角落提示、不出声</span></div>
         <button class="btn primary" id="schTipBtn">去设置</button></div>
+      <div id="shortcutTip" class="sc-tip hidden">
+        <div class="sc-ic">⭐</div>
+        <div class="sc-txt"><b>把「班级助手」放到桌面，以后点图标直接进</b>
+          <small>支持添加到手机桌面（微信内可顺手收藏/浮窗），或下载电脑桌面快捷方式，不用每次回微信翻链接</small></div>
+        <div class="row" style="gap:6px"><button class="btn primary sm" id="scTipGo">去保存快捷方式</button><button class="btn ghost sm" id="scTipClose">知道了</button></div>
+      </div>
       <div id="emptyMain" class="card hidden" style="text-align:center;padding:44px 20px"></div>
       <div class="hero" id="hero"></div>
 
@@ -451,7 +509,7 @@
             <label class="switch"><input type="checkbox" id="optUrgent"><span class="track"></span>紧急（上课也弹大窗）</label>
             <span class="row" style="gap:8px"><label class="switch"><input type="checkbox" id="optAt"><span class="track"></span>定时发送</label>
               <input class="input hidden" id="optAtTime" type="time" style="width:auto;padding:5px 10px;font-size:16px"></span>
-            <label class="switch hidden" id="bcCallToggleWrap"><input type="checkbox" id="bcCallOn"><span class="track"></span>群发多个班</label>
+            <label class="switch hidden" id="bcCallToggleWrap"><input type="checkbox" id="bcCallOn"><span class="track"></span>同时发多个班</label>
           </div>
           <div class="hidden" id="atRepeat" style="margin-top:10px">
             <div class="label" style="margin-bottom:6px"><svg class="i sm"><use href="#i-repeat"/></svg>重复（都不选就只发这一次） <button class="btn ghost sm" id="remWork">工作日</button><button class="btn ghost sm" id="remAll">每天</button></div>
@@ -554,6 +612,10 @@
             <div class="sec opts" id="hwPushBox">
               <label class="switch"><input type="checkbox" id="hwPush" checked><span class="track"></span>推送到大屏（上课中会下课后再发）</label>
               <input type="checkbox" id="hwVoice" hidden>
+            </div>
+            <div class="bc-wrap hidden" id="bcHwWrap" style="margin-top:14px">
+              <label class="switch"><input type="checkbox" id="bcHwOn"><span class="track"></span>同时布置到多个班</label>
+              <div class="hidden" id="bcHwBox"></div>
             </div>
             <button class="btn primary big" id="hwAdd" style="margin-top:20px"><svg class="i"><use href="#i-check"/></svg>布置</button>
             <div class="row hidden" id="hwEditBar" style="margin-top:10px;gap:8px;align-items:center;flex-wrap:wrap"><span class="me">正在修改，大屏一分钟内更新</span><button class="btn ghost sm" id="hwCancel">不改了</button><button class="btn ghost sm" id="hwDel" style="color:#ef5a5a">删除这条</button></div>
@@ -697,6 +759,30 @@
             <div class="sec"><div class="label">本节已抽</div><div class="chips" id="pickHist"></div></div>
           </div>
         </div>
+          <div class="card hidden" id="listenCard" style="margin-top:20px">
+            <div class="ctitle" style="align-items:flex-start"><div class="ib" style="background:#e3edf8;color:#1d4f80;flex-shrink:0"><svg class="i"><use href="#i-volume"/></svg></div>
+              <div style="flex:1;min-width:0"><h2>播放听力（平时训练 / 全年级广播）</h2>
+                <div class="sub" style="white-space:normal">不挡大屏课件，教室右下角浮出小巧播放条；支持多班提前缓存点名、10 秒试音与同步起播（MP3 / WAV ≤ 80 MB，7 天自动清理）</div></div></div>
+            <div class="bc-wrap hidden" id="bcListenWrap" style="margin:0 0 12px">
+              <label class="switch"><input type="checkbox" id="bcListenOn"><span class="track"></span>同时同步到多个班</label>
+              <div class="hidden" id="bcListenBox"></div>
+            </div>
+            <div class="row" style="flex-wrap:wrap;gap:10px;align-items:center">
+              <label class="btn soft-blue" style="position:relative;overflow:hidden">🎧 选择听力音频（MP3 / WAV）
+                <input type="file" id="ltFile" accept=".mp3,.wav,audio/mpeg,audio/wav" style="position:absolute;inset:0;opacity:0;cursor:pointer"></label>
+              <input class="input grow" id="ltTitle" maxlength="36" placeholder="听力标题（选好音频后自动填入，可修改）" style="min-width:190px">
+            </div>
+            <div id="ltProg" class="hidden" style="margin-top:10px"><div style="height:8px;border-radius:99px;background:var(--soft);overflow:hidden"><div id="ltBar" style="height:100%;width:0;background:var(--acc);transition:width .2s"></div></div><div class="me" id="ltProgTxt" style="font-size:12.5px;margin-top:4px"></div></div>
+            <div id="ltPicked" class="hidden" style="margin-top:10px"></div>
+            <div class="row" style="margin-top:12px;flex-wrap:wrap;gap:10px 16px;align-items:center">
+              <label class="switch"><input type="checkbox" id="ltTimed"><span class="track"></span>今天定时自动开播</label>
+              <input class="input hidden" id="ltTime" type="time" style="width:auto;padding:5px 10px;font-size:15px">
+              <span class="me" id="ltModeHint" style="font-size:12.5px;white-space:normal">不定时则保存后先后台缓存，随时点下方「立即播放」</span>
+              <span style="flex:1"></span>
+              <button class="btn primary" id="ltSave" disabled>保存并开始缓存</button>
+            </div>
+            <div class="sec"><div class="label">已上传的听力任务（近 7 天）</div><div id="ltList"></div></div>
+          </div>
           <div class="card" id="fileCard" style="margin-top:20px">
             <div class="ctitle"><div class="ib"><svg class="i"><use href="#i-file"/></svg></div><div><h2>发文件到大屏</h2><div class="sub">Word、PDF、PPT、Excel、网页、图片、视频，大屏上点"打开"就能放</div></div></div>
             <div class="bc-wrap hidden" id="bcFileWrap" style="margin:0 0 14px">
@@ -715,9 +801,10 @@
       <section class="view" data-view="board">
         <div class="card" id="examCard" style="margin-bottom:20px">
           <div class="ctitle"><div class="ib" style="background:#e3edf8;color:#1d4f80"><svg class="i"><use href="#i-cal"/></svg></div><div><h2>考试大屏</h2>
-            <div class="sub" style="white-space:normal">开考前 15 分钟整屏显示须知，考试中显示科目和倒计时；开考、剩 15 分钟、结束各播报一次。考试期间普通消息考完再显示，紧急消息照常</div></div></div>
+            <div class="sub" style="white-space:normal" id="examCardSub">开考前 15 分钟整屏显示须知，考试中显示科目和倒计时；开考、剩 15 分钟、结束各播报一次。考试期间普通消息考完再显示，紧急消息照常</div></div></div>
           <div id="examList"></div>
           <button class="btn soft" id="examNew" style="margin-top:10px"><svg class="i sm"><use href="#i-plus"/></svg>新建考试</button>
+          <input type="file" id="exAudioInput" accept=".mp3,.wav,audio/mpeg,audio/wav" class="hidden">
           <div id="examForm" class="hidden" style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)">
             <div class="sec"><div class="label">考试名称</div><input class="input" id="examName" maxlength="30" placeholder="如：高三 10 月月考"></div>
             <div class="sec"><div class="label">各场考试（科目、日期、开始、结束）</div><div id="examRows"></div>
@@ -746,13 +833,14 @@
               <textarea class="input" id="qtCustom" style="margin-top:12px" placeholder="添加自己的句子，一行一句，作者写在“——”后面，例如：&#10;今天的努力，是明天的底气。——高三1班&#10;静下心来，把每一道题做到底。——物理老师"></textarea>
               <div class="me" id="qtToday" style="margin-top:8px;white-space:normal"></div>
             </div>
-            <div class="sec" id="schBox"><div class="label"><svg class="i sm"><use href="#i-clock"/></svg>作息时间（上课时间内大屏安静显示；别的学校的班可以单独设置）</div>
-              <textarea class="input" id="schText" style="min-height:150px;font-variant-numeric:tabular-nums" placeholder="一行一节，例如：&#10;08:00-08:40&#10;08:50-09:30"></textarea>
+            <div class="sec" id="schBox"><div class="label"><svg class="i sm"><use href="#i-clock"/></svg>作息时间（喊话判断上课/课间和大屏安静显示都按这里算）</div>
+              <textarea class="input" id="schText" style="min-height:150px;font-variant-numeric:tabular-nums" placeholder="一行一节（24 小时制），例如：&#10;08:00-08:40&#10;14:00-14:40"></textarea>
               <div class="days" id="schDays" style="margin-top:10px"></div>
-              <div class="row" style="margin-top:10px"><span class="me" id="schHint" style="white-space:normal;display:block;flex:1 1 220px"></span>
+              <div class="me" id="schHint" style="white-space:normal;display:block;margin-top:10px;line-height:1.6"></div>
+              <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:8px;justify-content:flex-end">
                 <button class="btn ghost sm hidden" id="schReset">恢复用全校作息</button>
-                <button class="btn soft sm hidden" id="schSaveSchool"><svg class="i sm"><use href="#i-save"/></svg>保存为全校作息</button>
-                <button class="btn soft sm hidden" id="schSave"><svg class="i sm"><use href="#i-save"/></svg>保存为本班作息</button></div>
+                <button class="btn soft sm hidden" id="schSave"><svg class="i sm"><use href="#i-save"/></svg>保存为本班作息</button>
+                <button class="btn primary sm hidden" id="schSaveSchool"><svg class="i sm"><use href="#i-save"/></svg>保存为全校作息</button></div>
             </div>
             <div class="sec"><div class="label"><svg class="i sm"><use href="#i-homework"/></svg>本班科目（布置作业、早读、留言时选的科目）</div>
               <div class="me" style="white-space:normal;margin-bottom:8px">点一下选上或去掉。理科班可以去掉政治、历史、地理，文科班可以去掉物理、化学、生物；有别的科目在下面添加。只影响这个班。</div>
@@ -929,6 +1017,17 @@
         </div>
       </div>
     </details>
+    <details class="card hidden bu-box" id="bulkUnBox" style="box-shadow:none">
+      <summary style="cursor:pointer;list-style:none">
+        <div class="ctitle" style="margin:0">
+          <div class="ib" style="background:#ffeded;color:#dc2626;font-weight:900">!</div>
+          <div><h2 style="font-size:16px;color:#991b1b">批量远程卸载一体机（全校 / 多班）</h2>
+            <div class="sub" style="color:#7f4444">一键给多个或全部班级下发卸载指令：自动关接收端、取消开机自启、删桌面图标与程序</div></div>
+          <span class="right me" id="bulkUnBadge" style="color:#b91c1c">展开 ▾</span>
+        </div>
+      </summary>
+      <div id="bulkUnBody" style="margin-top:14px"></div>
+    </details>
     <div class="btns"><button class="btn" id="clsClose">关闭</button></div>
   </div>
 </div>
@@ -975,6 +1074,18 @@
     <h3 id="bcConfirmTitle"><svg class="i"><use href="#i-send"/></svg>确认群发</h3>
     <div id="bcConfirmBody"></div>
     <div class="btns"><button class="btn" id="bcConfirmNo">取消</button><button class="btn primary" id="bcConfirmYes">确认群发</button></div>
+  </div>
+</div>
+
+<div class="mask hidden" id="bulkUnMask">
+  <div class="dialog" style="max-width:500px">
+    <h3 style="color:#b91c1c">⚠️ 确认批量远程卸载一体机</h3>
+    <div id="bulkUnConfirmBody"></div>
+    <div style="margin-top:14px;padding:12px 14px;border-radius:14px;background:#fff5f5;border:1.5px solid #f7c7c4">
+      <label for="bulkUnTyped" style="display:block;font-size:13px;font-weight:700;color:#991b1b;margin-bottom:6px">高风险操作：请输入「确认卸载」四个字以解锁按钮</label>
+      <input class="input" id="bulkUnTyped" placeholder="请输入：确认卸载" autocomplete="off">
+    </div>
+    <div class="btns"><button class="btn" id="bulkUnNo">取消</button><button class="btn danger-solid" id="bulkUnYes" disabled>确认卸载</button></div>
   </div>
 </div>
 
@@ -1107,19 +1218,24 @@ function offlineOk(path, body) {  // 大屏没连上时先问一下老师
   return confirm(`${who}的大屏现在没有连接（一体机可能关机或断网），学生暂时看不到。\n\n仍然发送吗？大屏 2 小时内连上会自动显示。`);
 }
 
-// ---------- 管理员群发（喊话 / 定时提醒 / 大屏留言 / 发文件） ----------
-const BC_SCOPES = ['call', 'note', 'file'];
+// ---------- 多班同发（喊话 / 定时提醒 / 布置作业 / 大屏留言 / 发文件 / 平时听力） ----------
+const BC_SCOPES = ['call', 'hw', 'note', 'file', 'listen'];
 const BC_EL = {
   call: { wrap: '#bcCallToggleWrap', cb: '#bcCallOn', box: '#bcCallBox' },
+  hw: { wrap: '#bcHwWrap', cb: '#bcHwOn', box: '#bcHwBox' },
   note: { wrap: '#bcNoteWrap', cb: '#bcNoteOn', box: '#bcNoteBox' },
   file: { wrap: '#bcFileWrap', cb: '#bcFileOn', box: '#bcFileBox' },
+  listen: { wrap: '#bcListenWrap', cb: '#bcListenOn', box: '#bcListenBox' },
 };
 S.bc = {
   call: { on: false, set: new Set(), filter: '' },
+  hw: { on: false, set: new Set(), filter: '' },
   note: { on: false, set: new Set(), filter: '' },
   file: { on: false, set: new Set(), filter: '' },
+  listen: { on: false, set: new Set(), filter: '' },
 };
-const canBroadcast = () => !!(D.admin && !D.public && D.classes && D.classes.length > 1);
+// 本校：所有教 2 个及以上班级的老师/管理员都能同发；公共服务器：普通老师可给自己的多个班同发，管理员禁用以防误发他校
+const canBroadcast = () => !!((!D.public || !D.admin) && D.classes && D.classes.length > 1);
 const bcClassNames = () => (D.classes || []).map(c => c.name);
 function bcGradeGroups(names) {
   const map = new Map();
@@ -1152,9 +1268,10 @@ function bcSyncVisibility() {
   const ok = canBroadcast();
   BC_SCOPES.forEach(sc => {
     const el = BC_EL[sc];
-    const hide = !ok || (sc === 'note' && !!S.ntEdit);
+    const hide = !ok || (sc === 'note' && !!S.ntEdit) || (sc === 'hw' && !!S.hwEdit) || (sc === 'listen' && !!D.public);
     if ($(el.wrap)) $(el.wrap).classList.toggle('hidden', hide);
-    if (!ok) { S.bc[sc].on = false; if ($(el.cb)) $(el.cb).checked = false; }
+    if (!ok) S.bc[sc].on = false;
+    if ($(el.cb)) $(el.cb).checked = !!S.bc[sc].on;
     renderBc(sc);
   });
 }
@@ -1164,6 +1281,12 @@ function bcSyncActionUI(scope) {
     if (typeof renderTip === 'function') renderTip();
     if (typeof quickParse === 'function') quickParse();
     if (typeof updatePreview === 'function') updatePreview();
+  } else if (scope === 'hw' && !S.hwEdit) {
+    const btn = $('#hwAdd');
+    if (btn) {
+      btn.disabled = !!S.hwSaving || (st.on && !targets.length);
+      btn.lastChild.textContent = st.on && targets.length > 1 ? `同时布置到 ${targets.length} 个班` : '布置';
+    }
   } else if (scope === 'note' && !S.ntEdit) {
     const btn = $('#ntAdd');
     if (btn) {
@@ -1178,6 +1301,17 @@ function bcSyncActionUI(scope) {
         : targets.length > 1 ? `选好文件后会确认并群发到已选的 ${targets.length} 个班`
         : `将发送到 ${targets[0]}（也可以把文件拖到这里）`;
     }
+  } else if (scope === 'listen') {
+    const btn = $('#ltSave');
+    if (btn) {
+      btn.disabled = !!S.ltSaving || !S.ltAudio || !targets.length;
+      btn.textContent = st.on && targets.length > 1 ? `保存并缓存到 ${targets.length} 个班` : '保存并开始缓存';
+    }
+    if ($('#ltFile')) {
+      $('#ltFile').disabled = !!S.ltSaving;
+      if ($('#ltFile').parentElement) $('#ltFile').parentElement.style.opacity = S.ltSaving ? '.55' : '';
+    }
+    if ($('#ltClearAudio')) $('#ltClearAudio').disabled = !!S.ltSaving;
   }
 }
 function renderBcListOnly(scope) {
@@ -1191,7 +1325,7 @@ function renderBcListOnly(scope) {
 function renderBc(scope) {
   const st = S.bc[scope], el = BC_EL[scope], box = $(el.box);
   if (!box) return;
-  const hide = !canBroadcast() || !st.on || (scope === 'note' && !!S.ntEdit);
+  const hide = !canBroadcast() || !st.on || (scope === 'note' && !!S.ntEdit) || (scope === 'hw' && !!S.hwEdit) || (scope === 'listen' && !!D.public);
   box.classList.toggle('hidden', hide);
   if (!hide) {
     const prevScroll = box.querySelector('.bc-list')?.scrollTop || 0;
@@ -1200,7 +1334,7 @@ function renderBc(scope) {
     const sel = all.filter(c => st.set.has(c));
     const onCount = sel.filter(c => S.online && S.online[c]).length;
     const allOn = all.length > 0 && sel.length === all.length;
-    const groups = bcGradeGroups(all);
+    const groups = bcGradeGroups(all).filter(([, list]) => list.length < all.length);
     const q = (st.filter || '').trim().toLowerCase();
     const shown = q ? all.filter(c => c.toLowerCase().includes(q)) : all;
     const grpBtns = groups.map(([g, list]) => {
@@ -1219,7 +1353,7 @@ function renderBc(scope) {
       </div>
       ${all.length >= 12 ? `<input class="input bc-filter" data-bcfilter="${scope}" value="${esc(st.filter)}" placeholder="输入关键词筛选班级，如：高三、3班…">` : ''}
       <div class="bc-list">${shown.map(c => `<button type="button" class="chip ${st.set.has(c) ? 'on' : ''}" data-bccls="${scope}" data-cls="${esc(c)}"><span class="dot ${S.online && S.online[c] ? 'on' : ''}"></span>${esc(c)}</button>`).join('') || '<span class="me">没有匹配的班级</span>'}</div>
-      ${D.public ? '<div class="bc-warn">公共服务器提示：这里包含不同学校老师建的班级，群发前请仔细核对已选班级。</div>' : ''}
+      ${D.public && D.admin ? '<div class="bc-warn">公共服务器提示：这里包含不同学校老师建的班级，群发前请仔细核对已选班级。</div>' : ''}
     </div>`;
     const nextList = box.querySelector('.bc-list');
     if (nextList) nextList.scrollTop = prevScroll;
@@ -1249,7 +1383,7 @@ function confirmBroadcast({ title = '确认群发', targets, body, badges = [], 
   const show = targets.slice(0, 15), more = targets.length - show.length;
   $('#bcConfirmTitle').innerHTML = ic('send') + esc(title);
   $('#bcConfirmBody').innerHTML = `
-    ${D.public ? '<div class="bc-warn" style="margin:0 0 12px;font-weight:700">公共服务器提醒：以下内容将发送到不同学校的班级大屏，请务必核对目标班级！</div>' : ''}
+    ${D.public && D.admin ? '<div class="bc-warn" style="margin:0 0 12px;font-weight:700">公共服务器提醒：以下内容将发送到不同学校的班级大屏，请务必核对目标班级！</div>' : ''}
     <div style="font-size:15.5px;font-weight:700">发往 <span style="color:var(--acc-ink)">${targets.length}</span> 个班
       <span class="me" style="font-weight:500;margin-left:6px">${on} 个大屏在线${off ? `，${off} 个未连接` : ''}</span></div>
     <div class="bc-tags">${show.map(c => `<span class="tag">${esc(c)}</span>`).join('')}${more ? `<span class="tag" style="background:var(--soft);color:var(--muted)">等共 ${targets.length} 个班</span>` : ''}</div>
@@ -1259,7 +1393,7 @@ function confirmBroadcast({ title = '确认群发', targets, body, badges = [], 
     ${off ? `<p class="me" style="white-space:normal;margin:8px 0 0;color:#8a5a00">提示：有 ${off} 个班的大屏当前未连接，2 小时内连上会自动显示。</p>` : ''}`;
   const yes = $('#bcConfirmYes');
   yes.textContent = `确认发给 ${targets.length} 个班`;
-  yes.className = 'btn ' + (danger || D.public ? 'danger' : 'primary');
+  yes.className = 'btn ' + (danger || (D.public && D.admin) ? 'danger' : 'primary');
   $('#bcConfirmMask').classList.remove('hidden');
   return new Promise(res => { bcConfirmResolve = res; });
 }
@@ -1286,6 +1420,7 @@ const voiceOpts = () => ({ voice_name: $('#voiceSel').value, ...($('#optSpeak').
 const hash = s => [...s].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
 
 function showLogin() {
+  resetSessionState();
   $('#appView').classList.add('hidden'); $('#loginView').classList.remove('hidden'); $('#lgName').value = me;
   $('#loginArt').innerHTML = ART.call;
   $('#lgStandalone').classList.toggle('hidden', !(navigator.standalone || matchMedia('(display-mode: standalone)').matches));
@@ -1310,14 +1445,73 @@ async function login() {
   } catch (e) { $('#lgErr').textContent = e.message; }
 }
 
-async function start() {
+function resetTrackState() {
+  clearTimeout(trackTimer);
+  S.seen = null; S.seenMaxId = 0; S.mySentIds = new Set(); S.trk = {}; S.warned = new Set(); S.trackId = null;
+  if ($('#track')) $('#track').classList.add('hidden');
+}
+function resetSessionState(keepClassMask) {
+  resetTrackState();
+  $$('.mask').forEach(m => { if (!(keepClassMask && m.id === 'classMask')) m.classList.add('hidden'); });
+  if (typeof closeBcConfirm === 'function') closeBcConfirm(false);
+  if (S.ltXhr) { try { S.ltXhr.abort(); } catch {} S.ltXhr = null; }
+  S.sessionGen = (S.sessionGen || 0) + 1; S.bdSaving = false; S.hwSaving = false;
+  S.boardLoadedCls = ''; S.schLoadedCls = ''; S.exDeletedPlaying = false;
+  S.schSeq = (S.schSeq || 0) + 1; S.bdSeq = (S.bdSeq || 0) + 1; S.pvSeq = (S.pvSeq || 0) + 1; S.dutySeq = (S.dutySeq || 0) + 1;
+  S.ltUpSeq = (S.ltUpSeq || 0) + 1; S.ltDraftSeq = (S.ltDraftSeq || 0) + 1;
+  S.schOwn = false; S.schCustomClasses = []; S.schOrig = { cls: '', text: '', days: '' };
+  $$('#examRows .exrow').forEach(r => {
+    r._upSeq = (r._upSeq || 0) + 1;
+    if (r._xhr) { try { r._xhr.abort(); } catch {} r._xhr = null; }
+    const pr = r.querySelector('.ex-audio-prog'); if (pr) pr.classList.add('hidden');
+  });
+  S.ltAudio = null; S.ltAutoTitle = ''; S.ltItems = []; S.ltTargets = {}; S.ltTargetsManual = {}; S.ltSaving = false; S.ltCmdBusy = {};
+  S.exams = []; S.exTargets = {}; S.exTargetsManual = {}; S.exUploadRow = null; S.exSaving = false; S.exCmdBusy = {};
+  if (!keepClassMask) {
+    S.bu = { set: new Set(), filter: '', targets: [], busy: false };
+    if ($('#bulkUnBox')) $('#bulkUnBox').open = false;
+  }
+  if ($('#ltProg')) $('#ltProg').classList.add('hidden');
+  if ($('#ltPicked')) { $('#ltPicked').classList.add('hidden'); $('#ltPicked').innerHTML = ''; }
+  if ($('#ltTitle')) $('#ltTitle').value = '';
+  if ($('#ltTimed')) $('#ltTimed').checked = false;
+  if ($('#ltTime')) { $('#ltTime').classList.add('hidden'); $('#ltTime').value = ''; }
+  if ($('#ltModeHint')) $('#ltModeHint').textContent = '不定时则保存后先后台缓存，随时点下方「立即播放」';
+  if (S.bc) BC_SCOPES.forEach(sc => {
+    if (S.bc[sc]) { S.bc[sc].on = false; S.bc[sc].set = new Set(); S.bc[sc].filter = ''; }
+    if (BC_EL[sc] && $(BC_EL[sc].cb)) $(BC_EL[sc].cb).checked = false;
+  });
+}
+function syncShortcutTip() {
+  const standalone = !!(navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches));
+  const hide = !D.classes || !D.classes.length || standalone || store.get('cc_sc_tip_done') === '1';
+  if ($('#shortcutTip')) $('#shortcutTip').classList.toggle('hidden', hide);
+}
+function downloadUrlShortcut(url, isAdminPure) {
+  if (/MicroMessenger/i.test(navigator.userAgent)) {
+    return toast('微信内无法直接下载电脑快捷方式：请在电脑浏览器打开工作台再下载，或在微信右上角 ··· 选「收藏 / 浮窗」');
+  }
+  const cleanUrl = String(url || '').replace(/[\r\n]/g, '');
+  const content = `[InternetShortcut]\r\nURL=${cleanUrl}\r\n`;
+  const blob = new Blob([content], { type: 'application/internet-shortcut;charset=utf-8' });
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: '班级助手.url' });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 15000);
+  store.set('cc_sc_tip_done', '1');
+  syncShortcutTip();
+  toast(isAdminPure ? '已下载 班级助手.url（纯网址，不含密码）✓ 放到桌面双击即可打开' : '已下载 班级助手.url ✓ 放到自己电脑桌面双击即可自动登录');
+}
+async function start(keepClassMask) {
   try { D = await api('/api/classes'); } catch { return; }
+  resetSessionState(keepClassMask);
+  S.exAudioEnabled = !D.public;
   $('#loginView').classList.add('hidden'); $('#appView').classList.remove('hidden');
   me = D.me || me; store.set('cc_name', me); $('#me').textContent = me;
   if (!D.classes.some(c => c.name === S.cls)) S.cls = D.classes[0]?.name || '';
   fillClassSelect();
   if (!D.classes.length) {
     $('#hero').classList.add('hidden'); $('#rosterTip').classList.add('hidden'); $('#schTip').classList.add('hidden');
+    if ($('#shortcutTip')) $('#shortcutTip').classList.add('hidden');
     $$('section.view').forEach(el => el.classList.remove('on'));
     $('#emptyMain').innerHTML = `<h2>${D.admin ? '还没有班级' : '还没有加入任何班级'}</h2>
       <p class="me" style="justify-content:center;margin-top:8px;white-space:normal">${D.admin
@@ -1344,6 +1538,7 @@ async function start() {
   const sv = store.get('cc_voice');
   $('#voiceSel').value = D.voices.some(v => v.id === sv) ? sv : D.default_voice;
   if (D.public) $('#notice').maxLength = 200;
+  syncShortcutTip();
   renderNav(); renderStatic(); bcSyncVisibility(); go(S.view); refresh();
 }
 
@@ -1502,6 +1697,7 @@ async function send() {
   try {
     const r = await api('/api/send', { classes: targets, text, who: targets.length > 1 ? '' : (S.who || ''), voice: speak,
       loud: speak && !!(at || S.period && S.period.in_class), urgent, defer: $('#optDefer').checked, at, ...voiceOpts() });
+    (r.ids || []).forEach(id => { if (!S.mySentIds) S.mySentIds = new Set(); S.mySentIds.add(id); });
     const msg = targets.length > 1
       ? (r.exam ? `已群发给 ${targets.length} 个班（考试中的班考完后显示）` : at ? `已定时，今天 ${at} 群发给 ${targets.length} 个班` : `已群发给 ${targets.length} 个班`)
       : (r.exam ? '那时正在考试，考完后在大屏显示' : at ? `已定时，今天 ${at} 发到${targets[0]}大屏` : r.scheduled ? '已安排，下课后自动发送' : `已发送到${targets[0]}大屏`);
@@ -1644,17 +1840,17 @@ function quickParse() {
   const raw0 = $('#qText').value.trim();
   const c0 = cls(), bc = S.bc.call.on, targets = bcTargets('call');
   const parsed = raw0 && c0 ? parseIntent(raw0, { names: c0.students.map(s => s.name), subjects: subjOf(), subject: S.subject }) : null;
-  // 群发模式不触发单班动作（布置作业/计时/抽号/加分），只保留定时提醒与普通通知
-  S.intent = bc && parsed && parsed.type !== 'remind' ? null : parsed;
+  // 多班同发模式支持普通消息、定时提醒与布置作业；单班动作（计时/抽号/加分）按普通通知处理
+  S.intent = bc && parsed && !['remind', 'homework'].includes(parsed.type) ? null : parsed;
   const it = S.intent, chip = (k, v, warn) => `<span class="k">${k}</span><span class="v ${warn ? 'warn' : ''}">${esc(v)}</span>`;
   const label = { homework: '布置作业', timer: '开始计时', pick: '抽一位', remind: '保存提醒', points: it && it.delta < 0 ? '扣分' : '加分' };
   const btnTxt = bc && !targets.length ? '请选班级'
-    : it && label[it.type] ? (bc && targets.length > 1 && it.type === 'remind' ? `保存提醒 (${targets.length}班)` : label[it.type])
+    : it && label[it.type] ? (bc && targets.length > 1 && ['remind', 'homework'].includes(it.type) ? `${label[it.type]} (${targets.length}班)` : label[it.type])
     : bc && targets.length > 1 ? `群发 (${targets.length}班)` : '发送';
   $('#qSend').lastChild.textContent = btnTxt;
   if (it && label[it.type]) {
     $('#qSend').disabled = bc && !targets.length;
-    $('#qRes').innerHTML = it.type === 'homework' ? chip('布置作业', it.subject) + chip('内容', it.content) + (it.minutes ? chip('用时', it.minutes + ' 分钟') : '') + (it.due ? chip('交', it.due) : '') + '<span class="k">· 会同时推送到大屏</span>'
+    $('#qRes').innerHTML = it.type === 'homework' ? chip('布置作业', it.subject) + chip('内容', it.content) + (it.minutes ? chip('用时', it.minutes + ' 分钟') : '') + (it.due ? chip('交', it.due) : '') + (bc && targets.length > 1 ? chip('同时布置', `${targets.length} 个班`) : '') + '<span class="k">· 会同时推送到大屏</span>'
       : it.type === 'timer' ? chip('计时', it.seconds >= 60 ? `${Math.floor(it.seconds / 60)} 分钟${it.seconds % 60 ? ` ${it.seconds % 60} 秒` : ''}` : it.seconds + ' 秒') + (it.label ? chip('标题', it.label) : '') + '<span class="k">· 大屏全屏倒计时</span>'
       : it.type === 'pick' ? chip('随机抽号', S.cls) + '<span class="k">· 大屏滚动名单</span>'
       : it.type === 'remind' ? chip('定时提醒', `${DAYS_TXT(it.days)} ${it.time}`) + chip('内容', it.text) + (bc && targets.length > 1 ? chip('群发', `${targets.length} 个班`) : '')
@@ -1664,29 +1860,63 @@ function quickParse() {
   return quickParseCall();
 }
 async function runIntent() {
-  const it = S.intent; if (!it) return;
+  const it = S.intent; if (!it || S.sending) return;
+  const sessGen = S.sessionGen || 0, reqTok = token;
   const done = msg => { toast(msg); $('#qText').value = ''; S.intent = null; $('#qSend').lastChild.textContent = '发送'; $('#qSend').disabled = true; $('#qRes').innerHTML = Q_HINT; refresh(); };
-  try {
-    if (it.type === 'homework') { await api('/api/homework/add', { class: S.cls, subject: it.subject, content: it.content, minutes: it.minutes, due: it.due, push: true, ...voiceOpts() }); done(`已布置${it.subject}作业并推送到大屏 ✓`); }
-    else if (it.type === 'timer') { const r = await api('/api/tools/timer', { class: S.cls, seconds: it.seconds, label: it.label });
-      S.timer = { id: r.id, end_at: r.end_at, label: it.label, cls: S.cls }; store.set('cc_timer', JSON.stringify(S.timer)); done('大屏开始计时，可在"课堂"里停止'); }
-    else if (it.type === 'pick') { const r = await api('/api/tools/pick', { class: S.cls, voice: true, ...voiceOpts() }); S.picks.unshift(r.name); done(`抽到：${r.name}`); }
-    else if (it.type === 'remind') {
-      const targets = bcTargets('call'); if (!targets.length) return toast('请至少选择一个班级');
-      if (targets.length > 1) {
-        const ok = await confirmBroadcast({ title: '确认群发定时提醒', targets, body: it.text,
-          badges: [{ text: `${DAYS_TXT(it.days)} ${it.time}` }, { text: '语音播报' }],
-          note: '保存后将按设定时间自动发送到上述班级大屏。' });
-        if (!ok) return;
-      }
+  if (it.type === 'homework') {
+    const targets = bcTargets('call'); if (!targets.length) return toast('请至少选择一个班级');
+    if (targets.length > 1) {
+      const badges = [{ text: `科目：${it.subject}` }];
+      if (it.minutes) badges.push({ text: `预计 ${it.minutes} 分钟` });
+      if (it.due) badges.push({ text: it.due });
+      badges.push({ text: '推送到大屏（上课中下课后再发）' });
+      const ok = await confirmBroadcast({
+        title: '确认同时布置作业', targets, body: it.content, badges,
+        note: '各班会分别生成一条独立的今日作业记录，后续可按班单独修改。'
+      });
+      if (!ok || (S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+    }
+    S.sending = true;
+    try {
+      await api('/api/homework/add', targets.length > 1
+        ? { classes: targets, subject: it.subject, content: it.content, minutes: it.minutes, due: it.due, push: true, ...voiceOpts() }
+        : { class: targets[0], subject: it.subject, content: it.content, minutes: it.minutes, due: it.due, push: true, ...voiceOpts() });
+      if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+      if (S.bc.call.on) bcSetOn('call', false);
+      done(targets.length > 1 ? `已同时给 ${targets.length} 个班布置${it.subject}作业并推送到大屏 ✓`
+        : targets[0] !== S.cls ? `已给${targets[0]}布置${it.subject}作业并推送到大屏 ✓` : `已布置${it.subject}作业并推送到大屏 ✓`);
+    } catch (e) { if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(e.message); }
+    finally { if ((S.sessionGen || 0) === sessGen && token === reqTok) S.sending = false; }
+    return;
+  }
+  if (it.type === 'remind') {
+    const targets = bcTargets('call'); if (!targets.length) return toast('请至少选择一个班级');
+    if (targets.length > 1) {
+      const ok = await confirmBroadcast({ title: '确认群发定时提醒', targets, body: it.text,
+        badges: [{ text: `${DAYS_TXT(it.days)} ${it.time}` }, { text: '语音播报' }],
+        note: '保存后将按设定时间自动发送到上述班级大屏。' });
+      if (!ok || (S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+    }
+    S.sending = true;
+    try {
       await api('/api/reminders/save', { classes: targets, time: it.time, days: it.days, text: it.text, voice: true, ...voiceOpts() });
+      if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return;
       bcSetOn('call', false);
       done(targets.length > 1 ? `已设置群发提醒（${targets.length} 个班）：${DAYS_TXT(it.days)} ${it.time}` : `已设置：${DAYS_TXT(it.days)} ${it.time} 提醒`);
       loadReminders();
-    }
+    } catch (e) { if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(e.message); }
+    finally { if ((S.sessionGen || 0) === sessGen && token === reqTok) S.sending = false; }
+    return;
+  }
+  S.sending = true;
+  try {
+    if (it.type === 'timer') { const r = await api('/api/tools/timer', { class: S.cls, seconds: it.seconds, label: it.label });
+      S.timer = { id: r.id, end_at: r.end_at, label: it.label, cls: S.cls }; store.set('cc_timer', JSON.stringify(S.timer)); done('大屏开始计时，可在"课堂"里停止'); }
+    else if (it.type === 'pick') { const r = await api('/api/tools/pick', { class: S.cls, voice: true, ...voiceOpts() }); S.picks.unshift(r.name); done(`抽到：${r.name}`); }
     else if (it.type === 'points') { await api('/api/points/add', { class: S.cls, names: it.names, delta: it.delta, reason: it.reason, praise: it.delta > 0, ...voiceOpts() });
       done(`${it.names.join('、')} ${it.delta > 0 ? '+' : ''}${it.delta} 分 ✓` + (it.delta > 0 ? '，已在大屏表扬' : '')); }
   } catch (e) { toast(e.message); }
+  finally { if ((S.sessionGen || 0) === sessGen && token === reqTok) S.sending = false; }
 }
 function quickParseCall() {
   const raw = $('#qText').value.trim(), bc = S.bc.call.on, targets = bcTargets('call');
@@ -1739,7 +1969,7 @@ async function saveTimed() {  // 定时 + 重复：存成定时提醒
 
 // ---------- 作业 ----------
 async function loadHomework() {
-  syncChips(); loadMorning(); loadNotes();
+  syncChips(); renderBc('hw'); loadMorning(); loadNotes();
   $('#hwDate').textContent = new Date().toLocaleDateString('zh-CN', { ...BJ, month: 'long', day: 'numeric', weekday: 'long' });
   try {
     const r = await api('/api/homework?class=' + encodeURIComponent(S.cls));
@@ -1869,21 +2099,53 @@ function collectLine(h) {
 }
 let hwItems = [];
 async function addHomework() {
+  if (S.hwSaving) return;
   const content = $('#hwContent').value.trim();
   if (!content) return toast('请填写作业内容');
   const minutes = +$('#hwMinCustom').value || S.minutes;
-  try {
-    if (S.hwEdit) {
+  const sessGen = S.sessionGen || 0, reqTok = token;
+  if (S.hwEdit) {
+    S.hwSaving = true; $('#hwAdd').disabled = true;
+    try {
       await api('/api/homework/edit', { id: S.hwEdit, subject: S.subject, content, minutes, due: S.due });
-      toast('已修改，大屏一分钟内更新 ✓'); editHomework(null);
+      if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+      toast('已修改，大屏一分钟内更新 ✓'); editHomework(null); loadHomework();
+    } catch (e) { if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(e.message); }
+    finally { if ((S.sessionGen || 0) === sessGen && token === reqTok) { S.hwSaving = false; $('#hwAdd').disabled = false; bcSyncActionUI('hw'); } }
+    return;
+  }
+  const targets = bcTargets('hw');
+  if (!targets.length) return toast('请至少选择一个班级');
+  const push = $('#hwPush').checked;
+  if (targets.length > 1) {
+    const badges = [{ text: `科目：${S.subject}` }];
+    if (minutes) badges.push({ text: `预计 ${minutes} 分钟` });
+    if (S.due) badges.push({ text: S.due });
+    badges.push({ text: push ? '推送到大屏（上课中下课后再发）' : '仅记入今日作业' });
+    const ok = await confirmBroadcast({
+      title: '确认同时布置作业', targets, body: content, badges,
+      note: '各班会分别生成一条独立的今日作业记录，后续可按班单独修改。'
+    });
+    if (!ok || (S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+  }
+  S.hwSaving = true; bcSyncActionUI('hw');
+  try {
+    const r = await api('/api/homework/add', targets.length > 1
+      ? { classes: targets, subject: S.subject, content, minutes, due: S.due, push, voice: $('#hwVoice').checked, ...voiceOpts() }
+      : { class: targets[0], subject: S.subject, content, minutes, due: S.due, push, voice: $('#hwVoice').checked, ...voiceOpts() });
+    if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+    if (S.bc.hw.on) bcSetOn('hw', false);
+    if (targets.length > 1) {
+      toast(`已同时给 ${r.count || targets.length} 个班布置作业${push ? '并推送到大屏' : ''} ✓`);
+    } else if (targets[0] !== S.cls) {
+      toast(`已给${targets[0]}布置作业${push ? '并推送到大屏' : ''} ✓`);
     } else {
-      await api('/api/homework/add', { class: S.cls, subject: S.subject, content, minutes, due: S.due,
-        push: $('#hwPush').checked, voice: $('#hwVoice').checked, ...voiceOpts() });
-      toast($('#hwPush').checked ? '已布置并推送到大屏 ✓' : '已布置 ✓');
-      $('#hwContent').value = '';
+      toast(push ? '已布置并推送到大屏 ✓' : '已布置 ✓');
     }
+    $('#hwContent').value = '';
     loadHomework();
-  } catch (e) { toast(e.message); }
+  } catch (e) { if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(e.message); }
+  finally { if ((S.sessionGen || 0) === sessGen && token === reqTok) { S.hwSaving = false; bcSyncActionUI('hw'); } }
 }
 function editHomework(h) {  // 修改：填回左边的表单；null = 不改了（科目回到自己常用的）
   S.hwEdit = h ? h.id : null;
@@ -1895,8 +2157,10 @@ function editHomework(h) {  // 修改：填回左边的表单；null = 不改了
   } else S.subject = store.get('cc_subject') || S.subject;
   syncChips();
   $('#hwAdd').lastChild.textContent = h ? '保存修改' : '布置';
+  $('#hwAdd').disabled = false;
   $('#hwPushBox').classList.toggle('hidden', !!h);
   $('#hwEditBar').classList.toggle('hidden', !h);
+  bcSyncVisibility();
   if (h) { $('#hwContent').scrollIntoView({ behavior: 'smooth', block: 'center' }); $('#hwContent').focus(); }
 }
 
@@ -1926,12 +2190,222 @@ function editReminder(r) {  // 修改：填回一句话输入框，开着定时
 
 // ---------- 课堂 ----------
 const fmt = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+S.ltAudio = null; S.ltItems = []; S.ltTargets = {};
 function renderTools() {
   renderBc('file');
+  renderBc('listen');
   loadFiles();
+  loadListen();
   try { S.timer = JSON.parse(store.get('cc_timer') || 'null'); } catch { S.timer = null; }
   tickTimer();
   $('#pickHist').innerHTML = S.picks.length ? S.picks.map(n => `<span class="chip">${esc(n)}</span>`).join('') : '<span class="me">还没有</span>';
+}
+S.ltTargetsManual = {}; S.ltSeq = 0; S.ltXhr = null; S.ltUpSeq = 0; S.ltSaving = false; S.ltDraftSeq = 0; S.ltCmdBusy = {}; S.ltAutoTitle = '';
+function ltTargetsOf(id, st) {
+  const key = 'lt_' + id, all = (st.classes || []).map(c => c.class);
+  if (!S.ltTargetsManual[key] || !S.ltTargets[key]) {
+    const readyOn = (st.classes || []).filter(c => c.status === 'ready' && c.online).map(c => c.class);
+    const ready = (st.classes || []).filter(c => c.status === 'ready').map(c => c.class);
+    S.ltTargets[key] = new Set(readyOn.length ? readyOn : ready.length ? ready : (st.classes || []).filter(c => c.online).map(c => c.class));
+  }
+  const valid = new Set(all);
+  S.ltTargets[key] = new Set([...S.ltTargets[key]].filter(c => valid.has(c)));
+  return S.ltTargets[key];
+}
+function renderListenList() {
+  $('#ltList').innerHTML = (S.ltItems || []).map(t => {
+    const a = t.audio, st = t.audio_status;
+    const pct = st.total ? Math.round(st.ready / st.total * 100) : 0;
+    const unready = st.classes.filter(c => c.status !== 'ready');
+    const sel = ltTargetsOf(t.id, st);
+    const readyAll = st.classes.filter(c => c.status === 'ready').map(c => c.class);
+    const allReadyPicked = readyAll.length > 0 && readyAll.every(c => sel.has(c)) && sel.size === readyAll.length;
+    const chips = st.classes.map(c => {
+      if (c.cap_warn) return `<span class="r-chip bad">⚠ ${esc(c.class)}（${esc(c.cap_warn)}）</span>`;
+      if (c.status === 'ready' && !c.online) return `<span class="r-chip pend">✓ ${esc(c.class)}（已缓存·离线）</span>`;
+      if (c.status === 'ready') return `<span class="r-chip ok">✓ ${esc(c.class)}</span>`;
+      if (c.status === 'downloading') return `<span class="r-chip dl">↓ ${esc(c.class)}（下载中 ${c.pct}%）</span>`;
+      if (c.status === 'error') return `<span class="r-chip bad">⚠ ${esc(c.class)}（${esc(c.err || '重试中')}）</span>`;
+      if (c.status === 'offline') return `<span class="r-chip bad">⚠ ${esc(c.class)}（离线未下载）</span>`;
+      return `<span class="r-chip pend">… ${esc(c.class)}（等待缓存）</span>`;
+    }).join('');
+    const tgtChips = st.classes.map(c => {
+      const hint = !c.online ? (c.status === 'ready' ? '（已缓存·离线）' : '（离线）') : (c.status === 'ready' ? '' : '（缓存中）');
+      return `<button type="button" class="chip ${sel.has(c.class) ? 'on' : ''}" data-lttgt="${t.id}" data-ltcls="${esc(c.class)}" style="padding:4px 10px;font-size:12px${!c.online ? ';opacity:.6' : ''}">${esc(c.class)}${hint}</button>`;
+    }).join('');
+    const playing = st.playing || [];
+    const errs = st.errors || [];
+    const errBar = errs.length ? `<div style="margin-top:8px;padding:9px 12px;border-radius:12px;background:#fff1f1;border:1px solid #f5bcbc;color:#b91c1c;font-size:12.5px;line-height:1.5"><b>⚠ 教室播放异常：</b>${errs.map(er => `${esc(er.class)}（${esc(er.err || '请检查音响')}）`).join('；')}</div>` : '';
+    const playBar = playing.length ? (() => {
+      const p0 = playing[0];
+      const lbl = p0.state === 'testing' ? '正在播放试音' : p0.state === 'paused' ? '已暂停' : '正在播放听力';
+      const who = playing.length > 1 ? `${playing[0].class} 等 ${playing.length} 班` : playing[0].class;
+      return `<div class="ex-playing-bar"><div class="row" style="gap:10px"><span class="ex-pulse" style="${p0.state === 'paused' ? 'background:#ffd166' : ''}"></span>
+        <div><div style="font-weight:800;font-size:13.5px">${lbl} · ${esc(who)}</div>
+        <div style="font-size:12px;color:#a9c1d9">${p0.state === 'testing' ? '10 秒试音中' : `已播 ${fmtDur(p0.pos)} / ${fmtDur(p0.dur || a.duration)}`} · 教室大屏右下角浮条不挡课件</div></div></div>
+        <button type="button" class="btn danger sm" data-ltcmd="stop_playing" data-ltid="${t.id}">⏹ 停止播放</button></div>`;
+    })() : '';
+    return `<div class="ex-listen-panel" style="margin-bottom:12px">
+      <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:6px">
+        <div style="font-weight:800;font-size:14.5px;color:#163a5f">🎧 ${esc(t.title)} <span style="font-weight:500;color:var(--muted);font-size:12.5px">（${fmtDur(a.duration)} · ${fmtSize(a.size)}${t.classes.length > 1 ? ` · ${t.classes.length} 个班` : ''}）</span></div>
+        <div class="row" style="gap:6px">
+          ${t.play_at ? `<span class="tag" style="background:#e3effc;color:#1d4f80">⏰ ${esc(t.date.slice(5))} ${esc(t.play_at)} 自动开播</span>` : '<span class="tag" style="background:var(--acc-soft);color:var(--acc-ink)">手动随放</span>'}
+          ${t.can_delete ? `<button type="button" class="btn ghost sm" data-ltdel="${t.id}" title="删除">${ic('trash', 'sm')}</button>` : ''}
+        </div>
+      </div>
+      <div class="ex-cache-box">
+        <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:6px">
+          <div style="font-weight:800;font-size:13.5px">听力缓存：已就绪 <span style="color:var(--acc-ink)">${st.ready}</span> / ${st.total} 班${unready.length ? ` <span style="color:#cf2e2e;font-size:12px">· ${unready.length} 班未就绪</span>` : ' <span style="color:var(--acc-ink);font-size:12px">· 全部就绪 ✓</span>'}</div>
+          <button type="button" class="btn ghost sm" data-ltrefresh="1" style="font-size:12px">刷新点名 ↻</button>
+        </div>
+        <div class="ex-cache-bar"><div style="width:${pct}%"></div></div>
+        <div class="chips" style="gap:6px">${chips}</div>
+      </div>
+      <div class="ex-ctrl-box">
+        ${st.classes.length > 1 ? `<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center">
+          <span class="me" style="font-size:12.5px;font-weight:700">发送目标：</span>
+          <button type="button" class="chip ${allReadyPicked ? 'on' : ''}" data-lttgtall="${t.id}" ${readyAll.length ? '' : 'disabled'} style="padding:4px 10px;font-size:12px">✓ 全部已就绪 (${readyAll.length}班)</button>
+          ${tgtChips}
+        </div>` : ''}
+        <div class="ex-act-grid">
+          <div class="ex-act-card test"><button type="button" class="btn soft-blue sm" data-ltcmd="test" data-ltid="${t.id}" style="width:100%;padding:9px 12px">🔊 考前试音（10秒）</button></div>
+          <div class="ex-act-card play"><button type="button" class="btn primary sm" data-ltcmd="play" data-ltid="${t.id}" style="width:100%;padding:9px 12px">▶ 立即在${st.classes.length > 1 ? '选中班级' : '本班'}播放</button></div>
+        </div>
+      </div>
+      ${errBar}
+      ${playBar}
+    </div>`;
+  }).join('') || '<div class="me" style="padding:4px 0">还没有平时听力任务，选个 MP3 / WAV 上传即可开始缓存</div>';
+}
+async function loadListen(silent) {
+  if (D.public) { $('#listenCard').classList.add('hidden'); return; }
+  $('#listenCard').classList.remove('hidden');
+  const seq = ++S.ltSeq, reqCls = S.cls, reqTok = token;
+  let r;
+  try { r = await api('/api/listen?class=' + encodeURIComponent(reqCls)); }
+  catch {
+    if (!silent && seq === S.ltSeq && reqCls === S.cls && reqTok === token) {
+      S.ltItems = [];
+      $('#ltList').innerHTML = '<div class="me" style="padding:4px 0;color:#cf2e2e">加载本班听力列表失败，请点击重试或稍后刷新</div>';
+    }
+    return;
+  }
+  if (seq !== S.ltSeq || reqCls !== S.cls || reqTok !== token) return;
+  if (silent && S.view !== 'tools') return;
+  $('#listenCard').classList.toggle('hidden', !r.audio_enabled);
+  if (!r.audio_enabled) return;
+  S.ltItems = r.items || [];
+  renderListenList();
+}
+function uploadListenAudio(file) {
+  if (S.ltSaving) return toast('正在保存上一条听力，请等保存完成后再上传新文件');
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  if (!['mp3', 'wav'].includes(ext)) return toast('只支持 MP3 或 WAV 音频文件');
+  if (!file.size) return toast('音频文件是空的');
+  if (file.size > 80 * 1048576) return toast(`文件太大（${fmtSize(file.size)}），上限 80 MB`);
+  if (S.ltXhr) { try { S.ltXhr.abort(); } catch {} }
+  const seq = ++S.ltUpSeq, reqTok = token, prevAid = S.ltAudio ? S.ltAudio.id : '';
+  $('#ltProg').classList.remove('hidden'); $('#ltBar').style.width = '0%'; $('#ltProgTxt').textContent = `正在上传并校验 ${file.name}（${fmtSize(file.size)}）…`;
+  const xhr = new XMLHttpRequest();
+  S.ltXhr = xhr;
+  xhr.open('POST', `/api/exams/audio/upload?name=${encodeURIComponent(file.name)}${prevAid ? `&replace=${encodeURIComponent(prevAid)}` : ''}`);
+  xhr.setRequestHeader('Authorization', 'Bearer ' + reqTok);
+  xhr.upload.onprogress = ev => { if (seq === S.ltUpSeq && ev.lengthComputable) { const p = Math.round(ev.loaded / ev.total * 100); $('#ltBar').style.width = p + '%'; $('#ltProgTxt').textContent = `正在上传 ${file.name}：${p}%`; } };
+  xhr.onload = () => {
+    if (S.ltXhr === xhr) S.ltXhr = null;
+    if (seq !== S.ltUpSeq || reqTok !== token) return;
+    $('#ltProg').classList.add('hidden');
+    let j = {}; try { j = JSON.parse(xhr.responseText); } catch {}
+    if (xhr.status === 401) return showLogin();
+    if (xhr.status !== 200 || !j.audio) return toast(j.error || '上传失败，请重试');
+    S.ltDraftSeq = (S.ltDraftSeq || 0) + 1;
+    S.ltAudio = j.audio;
+    const autoT = j.audio.name.replace(/\.[^.]+$/, '').slice(0, 36);
+    if (!$('#ltTitle').value.trim() || $('#ltTitle').value.trim() === S.ltAutoTitle) {
+      $('#ltTitle').value = autoT; S.ltAutoTitle = autoT;
+    }
+    $('#ltPicked').innerHTML = `<div class="ex-audio-bar"><div style="flex:1"><div class="fn">🎵 ${esc(j.audio.name)}</div><div class="fi">${fmtSize(j.audio.size)} · 时长 ${fmtDur(j.audio.duration)} · SHA-256 已校验</div></div><button type="button" class="btn danger sm" id="ltClearAudio">重选</button></div>`;
+    $('#ltPicked').classList.remove('hidden');
+    bcSyncActionUI('listen');
+    toast('音频上传成功 ✓ 点下方「保存并开始缓存」');
+  };
+  xhr.onerror = () => {
+    if (S.ltXhr === xhr) S.ltXhr = null;
+    if (seq !== S.ltUpSeq || reqTok !== token) return;
+    $('#ltProg').classList.add('hidden'); toast('网络断了，上传失败请重试');
+  };
+  xhr.send(file);
+}
+async function saveListenTask() {
+  if (S.ltSaving) return;
+  if (S.ltXhr) return toast('音频正在上传，请等上传完成后再保存');
+  if (!S.ltAudio) return toast('请先选择听力音频');
+  const targets = bcTargets('listen');
+  if (!targets.length) return toast('请至少选择一个班级');
+  const timed = $('#ltTimed').checked, play_at = timed ? $('#ltTime').value.trim() : '';
+  if (timed && !play_at) return toast('请选择今天定时播放的时间');
+  const savedDraftSeq = S.ltDraftSeq || 0, savedAudioId = S.ltAudio.id, titleVal = $('#ltTitle').value.trim();
+  const sessGen = S.sessionGen || 0, reqTok = token;
+  S.ltSaving = true; bcSyncActionUI('listen');
+  try {
+    const res = await api('/api/listen/save', { classes: targets, audio_id: savedAudioId, title: titleVal, play_at });
+    if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+    if (res && res.item) { delete S.ltTargets['lt_' + res.item.id]; delete S.ltTargetsManual['lt_' + res.item.id]; }
+    if ((S.ltDraftSeq || 0) === savedDraftSeq) {
+      S.ltDraftSeq = savedDraftSeq + 1;
+      S.ltAudio = null; S.ltAutoTitle = ''; $('#ltTitle').value = ''; $('#ltPicked').classList.add('hidden'); $('#ltPicked').innerHTML = '';
+      $('#ltTimed').checked = false; $('#ltTime').classList.add('hidden'); $('#ltTime').value = '';
+      $('#ltModeHint').textContent = '不定时则保存后先后台缓存，随时点下方「立即播放」';
+    }
+    bcSetOn('listen', false);
+    toast(`已保存 ✓ ${targets.length > 1 ? `${targets.length} 个班的` : ''}一体机正在后台静默缓存`);
+    loadListen();
+  } catch (err) {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(err.message);
+  } finally {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) { S.ltSaving = false; bcSyncActionUI('listen'); }
+  }
+}
+async function sendListenCmd(action, id, btn) {
+  const t = (S.ltItems || []).find(x => x.id === id);
+  if (!t || !t.audio_status) return;
+  if (!Array.isArray(t.classes) || !t.classes.includes(S.cls)) {
+    toast('当前班级已切换，正在刷新本班听力列表…');
+    loadListen();
+    return;
+  }
+  const busyKey = `${action}:${id}`;
+  if (S.ltCmdBusy[busyKey]) return;
+  const realAct = action === 'stop_playing' ? 'stop' : action;
+  const targets = action === 'stop_playing'
+    ? [...new Set((t.audio_status.playing || []).map(p => p.class))]
+    : (t.audio_status.classes.length === 1 ? [t.audio_status.classes[0].class] : [...ltTargetsOf(id, t.audio_status)]);
+  if (!targets.length) return toast(realAct === 'stop' ? '当前没有正在播放的班级' : '请先勾选目标班级');
+  const offline = targets.filter(c => !(t.audio_status.classes.find(x => x.class === c) || {}).online);
+  const sessGen = S.sessionGen || 0, reqTok = token;
+  if (realAct === 'play') {
+    const unready = targets.filter(c => (t.audio_status.classes.find(x => x.class === c) || {}).status !== 'ready');
+    const msg = `确定立即在 ${targets.length > 1 ? `选中的 ${targets.length} 个班（${targets.join('、')}）` : targets[0]} 播放「${t.title}」吗？\n大屏只会在右下角浮出小巧播放条，不挡课件。`
+      + (offline.length ? `\n\n注意：${offline.join('、')} 当前离线，收不到实时指令。` : '')
+      + (unready.length ? `\n\n注意：${unready.join('、')} 尚未缓存完成，可能无法立即播放。` : '');
+    if (!confirm(msg)) return;
+  } else if (realAct === 'test' && offline.length) {
+    if (!confirm(`${offline.join('、')} 当前离线，收不到 10 秒试音指令。\n确定仍向其余在线班级发送试音吗？`)) return;
+  } else if (realAct === 'stop' && !confirm(`确定停止 ${targets.join('、')} 的听力播放吗？`)) return;
+  if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+  S.ltCmdBusy[busyKey] = true;
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/api/listen/cmd', { action: realAct, id, classes: targets });
+    if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+    const offNote = r.online_count < r.count ? `（其中 ${r.online_count} 班在线、${r.count - r.online_count} 班离线）` : '';
+    toast(realAct === 'test' ? `已发送 10 秒试音（${r.count} 班）${offNote} ✓` : realAct === 'play' ? `已下发播放指令（${r.count} 班，约 2 秒后同步起播）${offNote} ✓` : `已向 ${r.count} 个班发送停止指令 ✓`);
+    setTimeout(() => { if ((S.sessionGen || 0) === sessGen && token === reqTok) loadListen(true); }, 1200);
+  } catch (err) {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(err.message);
+  } finally {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) { delete S.ltCmdBusy[busyKey]; if (btn && btn.isConnected) btn.disabled = false; }
+  }
 }
 function tickTimer() {
   const t = S.timer, left = t ? t.end_at - Date.now() / 1000 : 0;
@@ -1963,19 +2437,123 @@ async function pick() {
 }
 
 // ---------- 大屏 ----------
-S.schDays = [];
+S.schDays = []; S.schOwn = false; S.schCustomClasses = []; S.schAdmin = false; S.schOrig = { cls: '', text: '', days: '' };
+S.sessionGen = S.sessionGen || 0; S.bdSaving = false; S.boardLoadedCls = ''; S.schLoadedCls = ''; S.schSeq = 0; S.bdSeq = 0; S.pvSeq = 0; S.dutySeq = 0; S.exDeletedPlaying = false;
+function syncBoardSaveBtns() {
+  const bdReady = S.boardLoadedCls === S.cls && !S.bdSaving;
+  const schReady = S.schLoadedCls === S.cls && !S.bdSaving;
+  ['#bdSave', '#epSave', '#sjSave', '#ttSave', '#prSave'].forEach(sel => { if ($(sel)) $(sel).disabled = !bdReady; });
+  ['#schSave', '#schSaveSchool', '#schReset'].forEach(sel => { if ($(sel)) $(sel).disabled = !schReady; });
+}
 async function loadSchedule() {
-  let r; try { r = await api('/api/schedule?class=' + encodeURIComponent(S.cls)); } catch { return; }
-  S.schDays = r.weekdays;
+  const reqCls = S.cls, reqGen = S.sessionGen || 0, reqTok = token;
+  const seq = (S.schSeq = (S.schSeq || 0) + 1);
+  S.schLoadedCls = ''; syncBoardSaveBtns();
+  let r;
+  try { r = await api('/api/schedule?class=' + encodeURIComponent(reqCls)); }
+  catch {
+    if (seq === S.schSeq && reqCls === S.cls && reqGen === (S.sessionGen || 0) && reqTok === token && $('#schHint')) {
+      $('#schHint').innerHTML = '<span style="color:#cf2e2e">作息时间加载失败，请刷新重试</span>';
+    }
+    return;
+  }
+  if (seq !== S.schSeq || reqCls !== S.cls || reqGen !== (S.sessionGen || 0) || reqTok !== token) return;
+  S.schDays = [...(r.weekdays || [])];
+  S.schOwn = !!r.own;
+  S.schAdmin = !!r.admin;
+  S.schCustomClasses = r.custom_classes || [];
   const edit = r.admin || r.can_class;
-  $('#schText').value = r.periods.map(p => p.join('-')).join('\n');
+  const txt = r.periods.map(p => p.join('-')).join('\n');
+  $('#schText').value = txt;
   $('#schText').disabled = !edit;
+  S.schOrig = { cls: reqCls, text: txt.trim(), days: JSON.stringify([...S.schDays].sort()) };
+  S.schLoadedCls = reqCls;
+  const showSchool = !!(r.admin && !D.public);
+  $('#schSaveSchool').classList.toggle('hidden', !showSchool);
   $('#schSave').classList.toggle('hidden', !r.can_class);
-  $('#schSaveSchool').classList.toggle('hidden', !r.admin || r.own);
-  $('#schReset').classList.toggle('hidden', !r.can_class || !r.own);
-  $('#schHint').innerHTML = (r.own ? `<b style="color:var(--c)">${esc(S.cls)} 使用单独的作息</b>` : `${esc(S.cls)} 使用全校作息`)
-    + `，共 ${r.periods.length} 节` + (edit ? '；一行一节，点下面的星期选上课日' : '；只有班主任和管理员可以修改');
+  $('#schSave').lastChild.textContent = showSchool ? '仅保存为本班作息' : '保存为本班作息';
+  $('#schReset').classList.toggle('hidden', !!D.public || !r.can_class || !r.own);
+  const customNote = (showSchool && S.schCustomClasses.length)
+    ? `<br><span style="color:#b46d00">提示：当前有 <b>${S.schCustomClasses.length} 个班</b>（${esc(S.schCustomClasses.slice(0, 6).join('、'))}${S.schCustomClasses.length > 6 ? ' 等' : ''}）使用单独作息；点「保存为全校作息」可一键同步覆盖全校。</span>` : '';
+  const headTxt = D.public
+    ? `${esc(S.cls)} 当前作息`
+    : (r.own ? `<b style="color:var(--c)">${esc(S.cls)} 当前使用单独的作息</b>` : `${esc(S.cls)} 当前使用全校作息`);
+  $('#schHint').innerHTML = headTxt
+    + `，共 ${r.periods.length} 节` + (edit ? '；一行一节（24 小时制），点上方星期选上课日' : '；只有班主任和管理员可以修改') + customNote;
   renderSchDays(edit);
+  syncBoardSaveBtns();
+  if (S.boardLoadedCls === reqCls && S.settings) renderTimetable();
+}
+function parseSchPeriods() {
+  const rawLines = $('#schText').value.split('\n');
+  const periods = [];
+  for (let i = 0; i < rawLines.length; i++) {
+    const raw = rawLines[i];
+    const l = raw.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/\u3000/g, ' ').trim();
+    if (!l) continue;
+    const m = l.match(/^(\d{1,2})\s*[:：]\s*(\d{2})\s*[-－−—–~～至到]\s*(\d{1,2})\s*[:：]\s*(\d{2})$/);
+    if (!m) { toast(`第 ${i + 1} 行作息时间格式不对（每行只能填一节课，如 14:00-14:40）：${raw.trim()}`); return null; }
+    const h1 = +m[1], m1 = +m[2], h2 = +m[3], m2 = +m[4];
+    if (h1 > 23 || h2 > 23 || m1 > 59 || m2 > 59) {
+      toast(`第 ${i + 1} 行时间超范围（小时 00–23，分钟 00–59）：${raw.trim()}`); return null;
+    }
+    const a = `${String(h1).padStart(2, '0')}:${String(m1).padStart(2, '0')}`;
+    const b = `${String(h2).padStart(2, '0')}:${String(m2).padStart(2, '0')}`;
+    if (a >= b) { toast(`第 ${i + 1} 行结束时间必须晚于开始时间：${a}-${b}`); return null; }
+    periods.push([a, b]);
+  }
+  if (!periods.length) { toast('请至少填写一节课的作息时间'); return null; }
+  if (periods.length > 30) { toast('作息节次最多 30 节'); return null; }
+  const early = periods.filter(p => p[0] < '06:00');
+  if (early.length && !confirm(`检测到早于 06:00 的节次（${early.map(p => p.join('-')).join('、')}）。\n下午时间请用 24 小时制（如 14:00-14:40）。确定仍按凌晨时间保存吗？`)) return null;
+  return periods;
+}
+async function saveScheduleScope(scope, snap) {
+  if (!snap) {
+    if (S.bdSaving) return { ok: false };
+    if (S.schLoadedCls !== S.cls || S.schOrig.cls !== S.cls) {
+      toast('本班作息尚未加载完成，请稍候再保存');
+      return { ok: false };
+    }
+  }
+  const targetCls = snap ? snap.targetCls : S.cls;
+  const sessGen = snap ? snap.sessGen : (S.sessionGen || 0);
+  const reqTok = snap ? snap.reqTok : token;
+  const periods = snap ? snap.periods : parseSchPeriods();
+  if (!periods) return { ok: false };
+  const weekdays = snap ? snap.weekdays : [...(S.schDays || [])];
+  const rawText = snap ? snap.rawText : $('#schText').value.trim();
+  const daysKey = snap ? snap.daysKey : JSON.stringify([...weekdays].sort());
+  const custom = snap ? snap.custom : [...(S.schCustomClasses || [])];
+  if (!weekdays.length) { toast('请至少选择一个上课日'); return { ok: false }; }
+  let applyAll = false;
+  if (scope === 'school') {
+    const msg = custom.length
+      ? `确定保存为全校作息吗？\n\n注意：当前有 ${custom.length} 个班（${custom.join('、')}）正在使用单独作息。\n点「确定」将一键覆盖同步全校所有班，统一改用最新全校作息。`
+      : '确定保存为全校作息吗？全校所有班的喊话和大屏都将按新时间生效。';
+    if (!confirm(msg)) return { ok: false };
+    applyAll = true;
+  }
+  if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return { ok: false, aborted: true };
+  const ownLock = !snap;
+  if (ownLock) { S.bdSaving = true; syncBoardSaveBtns(); }
+  try {
+    const r = await api('/api/schedule', scope === 'school'
+      ? { scope: 'school', periods, weekdays, apply_all: applyAll }
+      : { scope: 'class', class: targetCls, periods, weekdays });
+    if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return { ok: false, aborted: true };
+    toast(scope === 'school'
+      ? `全校作息已保存：${r.periods.length} 节课${r.cleared ? `（已同步覆盖原 ${r.cleared} 个单独作息班）` : ''} ✓`
+      : `已保存为${targetCls}的单独作息：${r.periods.length} 节课 ✓`);
+    if (scope === 'class') { D.no_schedule = (D.no_schedule || []).filter(c => c !== targetCls); renderNav(); }
+    if (S.cls === targetCls) S.schOrig = { cls: targetCls, text: rawText, days: daysKey };
+    return { ok: true, sameClass: S.cls === targetCls, targetCls };
+  } catch (e) {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(e.message);
+    return { ok: false };
+  } finally {
+    if (ownLock && (S.sessionGen || 0) === sessGen && token === reqTok) { S.bdSaving = false; syncBoardSaveBtns(); }
+  }
 }
 function renderSchDays(editable) {
   $('#schDays').innerHTML = DAYS.map((d, i) => `<button data-schday="${i + 1}" class="${S.schDays.includes(i + 1) ? 'on' : ''}" ${editable === false ? 'disabled' : ''}>${d}</button>`).join('');
@@ -1987,47 +2565,321 @@ function renderTimetable() {
     per.map((p, i) => `<tr${p[0] >= '18:00' ? ' style="background:#f6f4ff"' : ''}><td style="white-space:nowrap">${p[0] >= '18:00' ? '晚' + (i + 1 - per.filter(q => q[0] < '18:00').length) : i + 1}<div class="me" style="font-size:11px;display:block">${p[0]}</div></td>${days.map(d =>
       `<td><input class="input" data-tt="${d}-${i}" value="${esc(((tt[d] || [])[i] || {}).subject || '')}" maxlength="6" style="padding:6px 4px;text-align:center;min-width:52px"></td>`).join('')}</tr>`).join('') + '</tbody>';
 }
-// 考试大屏
+// 考试大屏（含可选听力音频、缓存就绪点名与考前试音/立即播放）
 const bjToday = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
 const mdText = d => `${+d.slice(5, 7)}月${+d.slice(8, 10)}日`;
-async function loadExamBoard() {
-  let r; try { r = await api('/api/exams?class=' + encodeURIComponent(S.cls)); } catch { return; }
-  S.exams = r.items; S.examNotice = r.default_notice;
+const fmtDur = sec => { const s = Math.max(0, Math.round(+sec || 0)); const m = Math.floor(s / 60), r = s % 60; return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`; };
+const hmToMin = hm => { const m = /^(\d{2}):(\d{2})$/.exec(hm || ''); return m ? (+m[1] * 60 + +m[2]) : null; };
+const shiftHm = (hm, diff) => {
+  const m = hmToMin(hm); if (m == null) return '';
+  const v = Math.max(0, Math.min(23 * 60 + 59, m + diff));
+  return `${String(Math.floor(v / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`;
+};
+S.exAudioEnabled = false; S.exAudioMaxMb = 80; S.exAudioEarly = 15; S.exTargets = {}; S.exTargetsManual = {}; S.exUploadRow = null; S.exSeq = 0; S.exSaving = false; S.exCmdBusy = {};
+function clearExamTargets(eid) {
+  if (eid == null) return;
+  const pfx = eid + ':';
+  Object.keys(S.exTargets).forEach(k => { if (k.startsWith(pfx)) delete S.exTargets[k]; });
+  Object.keys(S.exTargetsManual).forEach(k => { if (k.startsWith(pfx)) delete S.exTargetsManual[k]; });
+}
+function exTargetsOf(key, st) {
+  const all = (st.classes || []).map(c => c.class);
+  if (!S.exTargetsManual[key] || !S.exTargets[key]) {
+    const readyOn = (st.classes || []).filter(c => c.status === 'ready' && c.online).map(c => c.class);
+    const ready = (st.classes || []).filter(c => c.status === 'ready').map(c => c.class);
+    S.exTargets[key] = new Set(readyOn.length ? readyOn : ready.length ? ready : (st.classes || []).filter(c => c.online).map(c => c.class));
+  }
+  const valid = new Set(all);
+  S.exTargets[key] = new Set([...S.exTargets[key]].filter(c => valid.has(c)));
+  return S.exTargets[key];
+}
+function renderExamAudioPanel(e, x) {
+  const a = x.audio, st = x.audio_status;
+  if (!a || !st || !S.exAudioEnabled) return '';
+  const key = `${e.id}:${x.idx}`;
+  const pct = st.total ? Math.round(st.ready / st.total * 100) : 0;
+  const unready = st.classes.filter(c => c.status !== 'ready');
+  const sel = exTargetsOf(key, st);
+  const readyAll = st.classes.filter(c => c.status === 'ready').map(c => c.class);
+  const allReadyPicked = readyAll.length > 0 && readyAll.every(c => sel.has(c)) && sel.size === readyAll.length;
+  const chips = st.classes.map(c => {
+    if (c.cap_warn) return `<span class="r-chip bad">⚠ ${esc(c.class)}（${esc(c.cap_warn)}）</span>`;
+    if (c.status === 'ready' && !c.online) return `<span class="r-chip pend">✓ ${esc(c.class)}（已缓存·离线）</span>`;
+    if (c.status === 'ready') return `<span class="r-chip ok">✓ ${esc(c.class)}</span>`;
+    if (c.status === 'downloading') return `<span class="r-chip dl">↓ ${esc(c.class)}（下载中 ${c.pct}%）</span>`;
+    if (c.status === 'error') return `<span class="r-chip bad">⚠ ${esc(c.class)}（${esc(c.err || '校验重试中')}）</span>`;
+    if (c.status === 'offline') return `<span class="r-chip bad">⚠ ${esc(c.class)}（离线未下载）</span>`;
+    return `<span class="r-chip pend">… ${esc(c.class)}（等待缓存）</span>`;
+  }).join('');
+  const tgtChips = st.classes.map(c => {
+    const on = sel.has(c.class);
+    const hint = !c.online ? (c.status === 'ready' ? '（已缓存·离线）' : '（离线）') : (c.status === 'ready' ? '' : '（缓存中）');
+    return `<button type="button" class="chip ${on ? 'on' : ''}" data-extgt="${key}" data-excls2="${esc(c.class)}" style="padding:4px 10px;font-size:12px${!c.online ? ';opacity:.6' : ''}">${esc(c.class)}${hint}</button>`;
+  }).join('');
+  const playing = st.playing || [];
+  const errs = st.errors || [];
+  const errBar = errs.length ? `<div style="margin-top:8px;padding:9px 12px;border-radius:12px;background:#fff1f1;border:1px solid #f5bcbc;color:#b91c1c;font-size:12.5px;line-height:1.5"><b>⚠ 教室播放异常：</b>${errs.map(er => `${esc(er.class)}（${esc(er.err || '请检查音响')}）`).join('；')}</div>` : '';
+  const playBar = playing.length ? (() => {
+    const p0 = playing[0];
+    const lbl = p0.state === 'testing' ? '正在播放考前试音' : p0.state === 'paused' ? '听力已暂停' : '正在播放听力';
+    const who = playing.length > 1 ? `${playing[0].class} 等 ${playing.length} 班` : playing[0].class;
+    const misNote = playing.some(p => p.mismatch) ? ' · 当前大屏仍在播旧录音' : '';
+    return `<div class="ex-playing-bar"><div class="row" style="gap:10px"><span class="ex-pulse" style="${p0.state === 'paused' ? 'background:#ffd166' : ''}"></span>
+      <div><div style="font-weight:800;font-size:13.5px">${lbl} · ${esc(who)}</div>
+      <div style="font-size:12px;color:#a9c1d9">${p0.state === 'testing' ? '10 秒考前试音中' : `已播 ${fmtDur(p0.pos)} / ${fmtDur(p0.dur || a.duration)}`}${misNote} · 监考也可在大屏底部暂停或重播</div></div></div>
+      <button type="button" class="btn danger sm" data-excmd="stop_playing" data-exkey="${key}">⏹ 停止播放</button></div>`;
+  })() : '';
+  return `<div class="ex-listen-panel">
+    <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:6px">
+      <div style="font-weight:800;font-size:13.5px;color:#163a5f">🎧 ${esc(a.name)} <span style="font-weight:500;color:var(--muted);font-size:12.5px">（${fmtDur(a.duration)} · ${fmtSize(a.size)}）</span></div>
+      <span class="tag" style="background:#e3effc;color:#1d4f80">⏰ ${esc(a.start)} 自动起播</span>
+    </div>
+    <div class="ex-cache-box">
+      <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:6px">
+        <div style="font-weight:800;font-size:13.5px">听力缓存：已就绪 <span style="color:var(--acc-ink)">${st.ready}</span> / ${st.total} 班${unready.length ? ` <span style="color:#cf2e2e;font-size:12px;font-weight:700">· ${unready.length} 班未就绪</span>` : ' <span style="color:var(--acc-ink);font-size:12px">· 全部就绪 ✓</span>'}</div>
+        <button type="button" class="btn ghost sm" data-exrefresh="1" style="font-size:12px">刷新点名 ↻</button>
+      </div>
+      <div class="ex-cache-bar"><div style="width:${pct}%"></div></div>
+      <div class="chips" style="gap:6px">${chips}</div>
+      <div class="me" style="display:block;white-space:normal;font-size:12px;margin-top:8px">一体机后台静默预下载并做 SHA-256 校验（下坏自动重下）；开考纯播本地音频，断网不卡，同步误差 &lt; 1 秒。</div>
+    </div>
+    ${x.state !== 'done' && x.state !== 'ended' ? `<div class="ex-ctrl-box">
+      ${st.classes.length > 1 ? `<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center">
+        <span class="me" style="font-size:12.5px;font-weight:700">发送目标：</span>
+        <button type="button" class="chip ${allReadyPicked ? 'on' : ''}" data-extgtall="${key}" ${readyAll.length ? '' : 'disabled'} style="padding:4px 10px;font-size:12px">✓ 全部已就绪 (${readyAll.length}班)</button>
+        ${tgtChips}
+      </div>` : ''}
+      <div class="ex-act-grid">
+        <div class="ex-act-card test">
+          <button type="button" class="btn soft-blue sm" data-excmd="test" data-exkey="${key}" style="width:100%;padding:9px 12px">🔊 考前试音（10秒）</button>
+          <div class="me" style="display:block;white-space:normal;font-size:12px">选定班大屏播 10 秒试音提示，方便各班监考现场核对音响音量。</div>
+        </div>
+        <div class="ex-act-card play">
+          <button type="button" class="btn primary sm" data-excmd="play" data-exkey="${key}" style="width:100%;padding:9px 12px">▶ 立即在${st.classes.length > 1 ? '选中班级' : '本班'}开始播放听力</button>
+          <div class="me" style="display:block;white-space:normal;font-size:12px">手动发令同步起播，适合时间临时变动的测验（点前二次确认）。</div>
+        </div>
+      </div>
+    </div>` : ''}
+    ${errBar}
+    ${playBar}
+  </div>`;
+}
+function renderExamList() {
   const tag = { live: '<span class="tag" style="background:#e3edf8;color:#1d4f80">大屏显示中</span>', ended: '<span class="tag st-expired">已提前结束</span>', done: '<span class="tag st-expired">已考完</span>', todo: '' };
-  $('#examList').innerHTML = r.items.map(e => `<div class="item" style="align-items:flex-start"><div class="main">
+  $('#examList').innerHTML = (S.exams || []).map(e => `<div class="item" style="align-items:flex-start"><div class="main">
       <div class="txt" style="margin:0;font-weight:700">${esc(e.name)}${e.classes.length > 1 ? `<span class="me" style="font-weight:400;margin-left:8px">${e.classes.length} 个班</span>` : ''}</div>
-      ${e.sessions.map(x => `<div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap;font-size:14px"><span style="font-variant-numeric:tabular-nums">${mdText(x.date)} ${x.start}–${x.end}</span><b>${esc(x.subject)}</b>${tag[x.state] || ''}
-        ${x.state === 'live' ? `<button class="btn soft sm" data-exend="${e.id}:${x.idx}">提前结束</button>` : ''}</div>`).join('')}
-      <div class="meta" style="margin-top:6px"><span>${ic('user', 'sm')}${esc(e.creator)}</span></div></div>
+      ${e.sessions.map(x => `<div style="margin-top:8px"><div class="row" style="gap:8px;flex-wrap:wrap;font-size:14px"><span style="font-variant-numeric:tabular-nums">${mdText(x.date)} ${x.start}–${x.end}</span><b>${esc(x.subject)}</b>${tag[x.state] || ''}
+        ${x.state === 'live' ? `<button class="btn soft sm" data-exend="${e.id}:${x.idx}">提前结束</button>` : ''}</div>${renderExamAudioPanel(e, x)}</div>`).join('')}
+      <div class="meta" style="margin-top:8px"><span>${ic('user', 'sm')}${esc(e.creator)}</span>${e.sessions.some(x => x.audio) ? '<span>考后 7 天自动清理听力缓存</span>' : ''}</div></div>
       ${e.can_edit ? `<button class="btn ghost sm" data-exedit="${e.id}">编辑</button><button class="btn ghost sm" data-exdel="${e.id}" title="删除">${ic('trash', 'sm')}</button>` : ''}</div>`).join('')
     || '<div class="me" style="padding:4px 0">还没有考试安排</div>';
 }
+async function loadExamBoard(silent) {
+  const seq = ++S.exSeq, reqCls = S.cls, reqTok = token;
+  let r;
+  try { r = await api('/api/exams?class=' + encodeURIComponent(reqCls)); }
+  catch {
+    if (!silent && seq === S.exSeq && reqCls === S.cls && reqTok === token) {
+      S.exams = [];
+      $('#examList').innerHTML = '<div class="me" style="padding:4px 0;color:#cf2e2e">加载本班考试安排失败，请稍后刷新</div>';
+    }
+    return;
+  }
+  if (seq !== S.exSeq || reqCls !== S.cls || reqTok !== token) return;
+  if (silent && (!$('#examForm').classList.contains('hidden') || S.view !== 'board')) return;
+  S.exams = r.items; S.examNotice = r.default_notice;
+  S.exAudioEnabled = !!r.audio_enabled; S.exAudioMaxMb = r.audio_max_mb || 80; S.exAudioEarly = r.audio_early_max || 15;
+  if ($('#examCardSub')) {
+    $('#examCardSub').textContent = S.exAudioEnabled
+      ? '开考前 15 分钟整屏显示须知，考试中显示科目和倒计时；可选传听力音频（MP3/WAV ≤ 80MB），一体机提前缓存离线同步播。考试期间普通消息考完再显示，紧急消息照常'
+      : '开考前 15 分钟整屏显示须知，考试中显示科目和倒计时；开考、剩 15 分钟、结束各播报一次。考试期间普通消息考完再显示，紧急消息照常';
+  }
+  renderExamList();
+}
+function syncExEarlyChips(row) {
+  const startVal = row.querySelector('[data-k="start"]')?.value || '';
+  const astart = row.dataset.audioStart || startVal;
+  const diff = (hmToMin(startVal) != null && hmToMin(astart) != null) ? (hmToMin(startVal) - hmToMin(astart)) : null;
+  row.querySelectorAll('[data-exearly]').forEach(b => b.classList.toggle('on', diff === +b.dataset.exearly));
+}
+function renderExRowAudioHtml(row) {
+  const aid = row.dataset.audioId || '';
+  const box = row.querySelector('.ex-audio-slot');
+  const addBtn = row.querySelector('[data-exaddaudio]');
+  row.classList.toggle('has-audio', !!aid);
+  if (addBtn) addBtn.classList.toggle('hidden', !S.exAudioEnabled || !!aid);
+  if (!box) return;
+  if (!aid || !S.exAudioEnabled) { box.innerHTML = ''; return; }
+  const startVal = row.querySelector('[data-k="start"]')?.value || '';
+  const astart = row.dataset.audioStart || startVal;
+  const diff = (hmToMin(startVal) != null && hmToMin(astart) != null) ? (hmToMin(startVal) - hmToMin(astart)) : null;
+  const presets = [0, 5, 10, 15].map(m => `<button type="button" class="chip ${diff === m ? 'on' : ''}" data-exearly="${m}" style="padding:4px 10px;font-size:12px">${m === 0 ? `同开考${startVal ? ` (${startVal})` : ''}` : `提前 ${m} 分钟`}</button>`).join('');
+  box.innerHTML = `<div class="ex-audio-ed">
+    <div class="ex-audio-bar">
+      <div style="flex:1;min-width:160px"><div class="fn">🎵 ${esc(row.dataset.audioName || '听力音频')}</div>
+        <div class="fi">${fmtSize(+(row.dataset.audioSize || 0))} · 时长 ${fmtDur(+(row.dataset.audioDur || 0))}${row.dataset.audioSha ? ` · SHA-256 已校验 (${esc(row.dataset.audioSha)})` : ''}</div></div>
+      <button type="button" class="btn soft sm" data-exaddaudio="1">更换</button>
+      <button type="button" class="btn danger sm" data-exrmaudio="1">移除</button>
+    </div>
+    <div class="ex-play-row">
+      <span style="font-size:13px;font-weight:700;color:#1d4f80">⏰ 听力起播时间</span>
+      <input class="input" type="time" data-k="audio_start" value="${esc(astart)}" style="width:auto;padding:5px 10px;font-size:14.5px;font-weight:700">
+      <div class="chips" style="gap:6px">${presets}</div>
+    </div>
+    <div class="me" style="display:block;white-space:normal;font-size:12px;margin-top:7px;line-height:1.55">
+      支持 <b>MP3 / WAV</b>（上限 ${S.exAudioMaxMb} MB），多班共享只存一份，考完 7 天自动清理；起播时间默认同开考，最多早于开考 ${S.exAudioEarly} 分钟（播自带试音段），听力播放期间自动屏蔽普通“考试开始”语音防冲突。
+    </div>
+  </div>`;
+}
 function exRow(x = {}) {
-  return `<div class="exrow" style="display:flex;gap:6px 10px;flex-wrap:wrap;margin-bottom:10px;padding-bottom:10px;border-bottom:1px dashed var(--line)">
-    <div style="display:flex;gap:6px;flex:1 1 250px"><input class="input" data-k="subject" list="examSubjects" placeholder="科目" maxlength="10" style="flex:0 0 88px;min-width:0" value="${esc(x.subject || '')}">
-      <input class="input" type="date" data-k="date" style="flex:1;min-width:0" value="${esc(x.date || '')}"></div>
-    <div style="display:flex;gap:6px;align-items:center;flex:1 1 250px"><input class="input" type="time" data-k="start" style="flex:1;min-width:0" value="${esc(x.start || '')}"><span class="me">到</span>
-      <input class="input" type="time" data-k="end" style="flex:1;min-width:0" value="${esc(x.end || '')}">
-      <button class="btn ghost sm" data-exdelrow title="删掉这一场">${ic('x', 'sm')}</button></div></div>`;
+  const a = x.audio || null;
+  const astart = a ? (a.start || x.audio_start || x.start || '') : '';
+  const playingNow = (x.audio_status && (x.audio_status.playing || []).some(p => p.state === 'playing' || p.state === 'paused')) ? '1' : '0';
+  return `<div class="exrow exrow-box ${a ? 'has-audio' : ''}" data-prev-start="${esc(x.start || '')}" data-orig-audio-id="${esc(a ? a.id : '')}" data-playing-now="${playingNow}" data-audio-id="${esc(a ? a.id : '')}" data-audio-name="${esc(a ? a.name : '')}" data-audio-size="${a ? a.size : 0}" data-audio-dur="${a ? a.duration : 0}" data-audio-sha="${esc(a ? (a.sha256 || '') : '')}" data-audio-start="${esc(astart)}">
+    <div style="display:flex;gap:6px 10px;flex-wrap:wrap;align-items:center">
+      <div style="display:flex;gap:6px;flex:1 1 220px"><input class="input" data-k="subject" list="examSubjects" placeholder="科目" maxlength="10" style="flex:0 0 84px;min-width:0" value="${esc(x.subject || '')}">
+        <input class="input" type="date" data-k="date" style="flex:1;min-width:0" value="${esc(x.date || '')}"></div>
+      <div style="display:flex;gap:6px;align-items:center;flex:1 1 260px;flex-wrap:wrap"><input class="input" type="time" data-k="start" style="flex:1 1 88px;min-width:0" value="${esc(x.start || '')}"><span class="me">到</span>
+        <input class="input" type="time" data-k="end" style="flex:1 1 88px;min-width:0" value="${esc(x.end || '')}">
+        ${S.exAudioEnabled ? `<button type="button" class="btn soft-blue sm ${a ? 'hidden' : ''}" data-exaddaudio="1">🎧 添加听力</button>` : ''}
+        <button type="button" class="btn ghost sm" data-exdelrow title="删掉这一场">${ic('x', 'sm')}</button></div>
+    </div>
+    <div class="ex-audio-prog hidden" style="margin-top:8px"><div style="height:8px;border-radius:99px;background:var(--soft);overflow:hidden"><div class="bar" style="height:100%;width:0;background:var(--acc);transition:width .2s"></div></div><div class="me ptxt" style="font-size:12px;margin-top:4px"></div></div>
+    <div class="ex-audio-slot"></div>
+  </div>`;
 }
 function openExamForm(e) {
+  closeExamForm();
   S.exEdit = e ? e.id : null;
   $('#examName').value = e ? e.name : '';
   $('#examRows').innerHTML = (e ? e.sessions : [{ date: bjToday() }]).map(exRow).join('');
+  $$('#examRows .exrow').forEach(renderExRowAudioHtml);
   $('#examNotice').value = e ? e.notice : S.examNotice || '';
   $('#examSubjects').innerHTML = ((D.class_subjects || {})[S.cls] || D.subjects || []).map(x => `<option value="${esc(x)}">`).join('');
   S.exClasses = new Set(e ? e.classes : [S.cls]);
-  $('#examClsBox').classList.toggle('hidden', !D.admin);  // 班主任只能给自己的班设
-  $('#examClasses').innerHTML = D.classes.map(c => `<button class="chip ${S.exClasses.has(c.name) ? 'on' : ''}" data-excls="${esc(c.name)}">${esc(c.name)}</button>`).join('');
+  $('#examClsBox').classList.toggle('hidden', !canBroadcast());  // 有多个班时可勾选同时显示的大屏（公共模式管理员禁用）
+  $('#examClasses').innerHTML = D.classes.map(c => `<button type="button" class="chip ${S.exClasses.has(c.name) ? 'on' : ''}" data-excls="${esc(c.name)}">${esc(c.name)}</button>`).join('');
   $('#examForm').classList.remove('hidden'); $('#examNew').classList.add('hidden');
 }
-function closeExamForm() { $('#examForm').classList.add('hidden'); $('#examNew').classList.remove('hidden'); }
-async function saveExam() {
-  const sessions = $$('#examRows .exrow').map(r => Object.fromEntries([...r.querySelectorAll('[data-k]')].map(i => [i.dataset.k, i.value.trim()])));
+function closeExamForm() {
+  $$('#examRows .exrow').forEach(r => {
+    r._upSeq = (r._upSeq || 0) + 1;
+    if (r._xhr) { try { r._xhr.abort(); } catch {} r._xhr = null; }
+    const pr = r.querySelector('.ex-audio-prog'); if (pr) pr.classList.add('hidden');
+  });
+  S.exUploadRow = null; S.exDeletedPlaying = false;
+  $('#examForm').classList.add('hidden'); $('#examNew').classList.remove('hidden');
+}
+function uploadExamAudioForRow(row, file) {
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  if (!['mp3', 'wav'].includes(ext)) return toast('考试听力只支持 MP3 或 WAV 格式');
+  if (!file.size) return toast('音频文件是空的');
+  if (file.size > S.exAudioMaxMb * 1048576) return toast(`文件太大（${fmtSize(file.size)}），上限 ${S.exAudioMaxMb} MB`);
+  if (row._xhr) { try { row._xhr.abort(); } catch {} }
+  const seq = row._upSeq = (row._upSeq || 0) + 1, reqTok = token, prevAid = row.dataset.audioId || '';
+  const prog = row.querySelector('.ex-audio-prog'), bar = prog.querySelector('.bar'), ptxt = prog.querySelector('.ptxt');
+  prog.classList.remove('hidden'); bar.style.width = '0%'; ptxt.textContent = `正在上传并校验 ${file.name}（${fmtSize(file.size)}）…`;
+  const xhr = new XMLHttpRequest();
+  row._xhr = xhr;
+  xhr.open('POST', `/api/exams/audio/upload?name=${encodeURIComponent(file.name)}${prevAid ? `&replace=${encodeURIComponent(prevAid)}` : ''}`);
+  xhr.setRequestHeader('Authorization', 'Bearer ' + reqTok);
+  xhr.upload.onprogress = ev => { if (row.isConnected && seq === row._upSeq && ev.lengthComputable) { const p = Math.round(ev.loaded / ev.total * 100); bar.style.width = p + '%'; ptxt.textContent = `正在上传 ${file.name}：${p}%`; } };
+  xhr.onload = () => {
+    if (row._xhr === xhr) row._xhr = null;
+    if (!row.isConnected || seq !== row._upSeq || reqTok !== token) return;
+    prog.classList.add('hidden');
+    let j = {}; try { j = JSON.parse(xhr.responseText); } catch {}
+    if (xhr.status === 401) return showLogin();
+    if (xhr.status !== 200 || !j.audio) return toast(j.error || '上传失败，请重试');
+    const a = j.audio;
+    const sv = row.querySelector('[data-k="start"]')?.value || '';
+    row.dataset.audioId = a.id; row.dataset.audioName = a.name; row.dataset.audioSize = a.size;
+    row.dataset.audioDur = a.duration; row.dataset.audioSha = a.sha256 || '';
+    if (!row.dataset.audioStart) row.dataset.audioStart = sv;
+    row.dataset.prevStart = sv;
+    renderExRowAudioHtml(row);
+    toast(`已上传听力：${a.name}（时长 ${fmtDur(a.duration)}）✓`);
+  };
+  xhr.onerror = () => {
+    if (row._xhr === xhr) row._xhr = null;
+    if (!row.isConnected || seq !== row._upSeq || reqTok !== token) return;
+    prog.classList.add('hidden'); toast('网络断了，上传失败请重试');
+  };
+  xhr.send(file);
+}
+async function sendExamAudioCmd(action, key, btn) {
+  const [eid, idx] = key.split(':').map(Number);
+  const e = (S.exams || []).find(x => x.id === eid);
+  const sess = e && e.sessions.find(x => x.idx === idx);
+  if (!e || !sess || !sess.audio_status) return;
+  if (!Array.isArray(e.classes) || !e.classes.includes(S.cls)) {
+    toast('当前班级已切换，正在刷新本班考试安排…');
+    loadExamBoard();
+    return;
+  }
+  const busyKey = `${action}:${key}`;
+  if (S.exCmdBusy[busyKey]) return;
+  const st = sess.audio_status;
+  const realAct = action === 'stop_playing' ? 'stop' : action;
+  const targets = action === 'stop_playing'
+    ? [...new Set((st.playing || []).map(p => p.class))]
+    : (st.classes.length === 1 ? [st.classes[0].class] : [...exTargetsOf(key, st)]);
+  if (!targets.length) return toast(realAct === 'stop' ? '当前没有正在播放的班级' : '请先勾选要发送的目标班级');
+  const sessGen = S.sessionGen || 0, reqTok = token;
+  const offline = targets.filter(c => !(st.classes.find(x => x.class === c) || {}).online);
+  if (realAct === 'play') {
+    const unready = targets.filter(c => (st.classes.find(x => x.class === c) || {}).status !== 'ready');
+    const msg = `确定立即在选中的 ${targets.length} 个班（${targets.join('、')}）同步开始播放【${sess.subject}】听力吗？`
+      + (offline.length ? `\n\n注意：${offline.join('、')} 当前离线，收不到实时开播指令。` : '')
+      + (unready.length ? `\n\n注意：${unready.join('、')} 尚未缓存就绪，可能无法立即播放。` : '\n\n各班大屏将在约 2 秒后同步起播。');
+    if (!confirm(msg)) return;
+  } else if (realAct === 'test' && offline.length) {
+    if (!confirm(`${offline.join('、')} 当前离线，收不到 10 秒试音指令。\n确定仍向其余在线班级发送试音吗？`)) return;
+  } else if (realAct === 'stop') {
+    if (!confirm(`确定停止 ${targets.join('、')} 的听力播放吗？`)) return;
+  }
+  if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+  S.exCmdBusy[busyKey] = true;
+  if (btn) btn.disabled = true;
   try {
-    await api('/api/exams/save', { id: S.exEdit, name: $('#examName').value, classes: [...S.exClasses], sessions, notice: $('#examNotice').value });
-    toast('已保存 ✓ 到时间大屏会自动显示'); closeExamForm(); loadExamBoard();
-  } catch (err) { toast(err.message); }
+    const r = await api('/api/exams/audio/cmd', { action: realAct, exam_id: eid, idx, classes: targets });
+    if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+    const offNote = r.online_count < r.count ? `（其中 ${r.online_count} 班在线、${r.count - r.online_count} 班离线）` : '';
+    const txt = realAct === 'test' ? `已向 ${r.count} 个班发送 10 秒考前试音${offNote} ✓`
+      : realAct === 'play' ? `已下发同步播放指令（${r.count} 个班，约 2 秒后同步起播）${offNote} ✓`
+      : `已向 ${r.count} 个班发送停止指令 ✓`;
+    toast(txt);
+    setTimeout(() => { if ((S.sessionGen || 0) === sessGen && token === reqTok) loadExamBoard(true); }, 1200);
+  } catch (err) {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(err.message);
+  } finally {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) { delete S.exCmdBusy[busyKey]; if (btn && btn.isConnected) btn.disabled = false; }
+  }
+}
+async function saveExam() {
+  if (S.exSaving) return;
+  if ($$('#examRows .exrow').some(r => !!r._xhr)) return toast('听力音频正在上传中，请等上传完成后再保存');
+  const changedPlaying = !!S.exDeletedPlaying || $$('#examRows .exrow').some(r => r.dataset.playingNow === '1' && (r.dataset.audioId || '') !== (r.dataset.origAudioId || ''));
+  if (changedPlaying && !confirm('提示：有场次正在教室播放/暂停听力。\n此时更换或移除音频不会打断当前播放，但建议先点「停止播放」再换新录音。\n确定仍要保存吗？')) return;
+  const sessGen = S.sessionGen || 0, reqTok = token;
+  const sessions = $$('#examRows .exrow').map(r => {
+    const o = Object.fromEntries([...r.querySelectorAll('[data-k]')].map(i => [i.dataset.k, i.value.trim()]));
+    if (r.dataset.audioId) { o.audio_id = r.dataset.audioId; if (!o.audio_start) o.audio_start = o.start; }
+    return o;
+  });
+  const payload = { id: S.exEdit, name: $('#examName').value, classes: [...S.exClasses], sessions, notice: $('#examNotice').value };
+  S.exSaving = true; $('#examSave').disabled = true;
+  try {
+    const res = await api('/api/exams/save', payload);
+    if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+    clearExamTargets(payload.id);
+    if (res && res.item) clearExamTargets(res.item.id);
+    toast('已保存 ✓ 到时间大屏会自动显示，已配听力的班会立即后台预下载'); closeExamForm(); loadExamBoard();
+  } catch (err) {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(err.message);
+  } finally {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) { S.exSaving = false; $('#examSave').disabled = false; }
+  }
 }
 async function loadBoard() {
   const isHead = curRole() !== 'teacher';
@@ -2035,8 +2887,20 @@ async function loadBoard() {
   closeExamForm();
   loadExamBoard();
   if (!isHead) return;
+  const reqCls = S.cls, reqGen = S.sessionGen || 0, reqTok = token;
+  const seq = (S.bdSeq = (S.bdSeq || 0) + 1);
+  S.boardLoadedCls = ''; syncBoardSaveBtns();
   loadSchedule();
-  try { S.settings = await api('/api/settings?class=' + encodeURIComponent(S.cls)); } catch { return; }
+  let stRes;
+  try { stRes = await api('/api/settings?class=' + encodeURIComponent(reqCls)); }
+  catch {
+    if (seq === S.bdSeq && reqCls === S.cls && reqGen === (S.sessionGen || 0) && reqTok === token) toast('大屏设置加载失败，请刷新重试');
+    return;
+  }
+  if (seq !== S.bdSeq || reqCls !== S.cls || reqGen !== (S.sessionGen || 0) || reqTok !== token) return;
+  S.settings = stRes;
+  S.boardLoadedCls = reqCls;
+  syncBoardSaveBtns();
   const qt = S.settings.quotes || {};
   $('#qtOn').checked = qt.enabled !== false; $('#qtBuiltin').checked = qt.builtin !== false;
   $('#qtBuiltinLabel').textContent = `使用内置的励志名言和古诗词（${S.settings.builtin_quotes || 0} 条）`;
@@ -2072,8 +2936,11 @@ function renderCd(list) {
 }
 const readCd = () => $$('#cdRows .cd-row').map(r => ({ name: r.querySelector('[data-cdname]').value.trim(), date: r.querySelector('[data-cddate]').value }));
 async function renderBoardPreview() {
+  const reqCls = S.cls, reqGen = S.sessionGen || 0, reqTok = token;
+  const seq = (S.pvSeq = (S.pvSeq || 0) + 1);
   const now = new Date(), cds = readCd().filter(c => c.name && c.date);
-  let hw = []; try { hw = (await api('/api/homework?class=' + encodeURIComponent(S.cls))).items; } catch {}
+  let hw = []; try { hw = (await api('/api/homework?class=' + encodeURIComponent(reqCls))).items; } catch {}
+  if (seq !== S.pvSeq || reqCls !== S.cls || reqGen !== (S.sessionGen || 0) || reqTok !== token) return;
   $('#bdPreview').innerHTML = `<div class="clock">${now.toLocaleTimeString('zh-CN', { ...BJ, hour: '2-digit', minute: '2-digit', hour12: false })}</div>
     <div class="muted">${now.toLocaleDateString('zh-CN', { ...BJ, month: 'long', day: 'numeric', weekday: 'long' })} · ${esc(S.cls)}</div>
     <div class="cds">${cds.map(c => `<span class="cd">距${esc(c.name)}<b>${Math.max(0, Math.round((new Date(c.date + 'T00:00:00') - bjDay()) / 864e5))}</b>天</span>`).join('')}</div>
@@ -2097,24 +2964,92 @@ function readPlan() {  // 晚自习时间安排：一行"19:00-19:40 语文"；�
   return out;
 }
 $('#sbTools').addEventListener('change', async () => {  // 开关一拨就保存
-  try { await api('/api/settings', { class: S.cls, tools_tab: $('#sbTools').checked }); toast($('#sbTools').checked ? '大屏右边会显示「工具」把手 ✓' : '已关掉大屏「工具」把手 ✓'); }
-  catch (e) { toast(e.message); }
+  const targetCls = S.cls, sessGen = S.sessionGen || 0, reqTok = token, val = $('#sbTools').checked;
+  if (S.boardLoadedCls !== targetCls) { $('#sbTools').checked = !val; return toast('当前班级设置尚未加载完成，请稍候'); }
+  try {
+    await api('/api/settings', { class: targetCls, tools_tab: val });
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(val ? '大屏右边会显示「工具」把手 ✓' : '已关掉大屏「工具」把手 ✓');
+  } catch (e) {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) { if (S.cls === targetCls) $('#sbTools').checked = !val; toast(e.message); }
+  }
 });
 $('#sbDesk').addEventListener('change', async () => {
-  try { await api('/api/settings', { class: S.cls, desk_board: $('#sbDesk').checked }); toast($('#sbDesk').checked ? '大屏桌面右侧会放一个小看板 ✓ 一分钟内出现' : '已撤掉桌面小看板 ✓'); }
-  catch (e) { toast(e.message); }
+  const targetCls = S.cls, sessGen = S.sessionGen || 0, reqTok = token, val = $('#sbDesk').checked;
+  if (S.boardLoadedCls !== targetCls) { $('#sbDesk').checked = !val; return toast('当前班级设置尚未加载完成，请稍候'); }
+  try {
+    await api('/api/settings', { class: targetCls, desk_board: val });
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(val ? '大屏桌面右侧会放一个小看板 ✓ 一分钟内出现' : '已撤掉桌面小看板 ✓');
+  } catch (e) {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) { if (S.cls === targetCls) $('#sbDesk').checked = !val; toast(e.message); }
+  }
 });
 $('#epSave').onclick = async () => {
+  const targetCls = S.cls, sessGen = S.sessionGen || 0, reqTok = token;
+  if (S.boardLoadedCls !== targetCls) return toast('当前班级设置尚未加载完成，请稍候');
   const plan = readPlan(); if (!plan) return;
-  try { await api('/api/settings', { class: S.cls, eve_plan: plan }); toast(plan.length ? '时间安排已保存，大屏一分钟内更新 ✓' : '时间安排已撤掉 ✓'); }
-  catch (e) { toast(e.message); }
+  try {
+    await api('/api/settings', { class: targetCls, eve_plan: plan });
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(plan.length ? '时间安排已保存，大屏一分钟内更新 ✓' : '时间安排已撤掉 ✓');
+  } catch (e) { if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(e.message); }
 };
 async function saveBoard() {
+  if (S.bdSaving) return;
+  const targetCls = S.cls, sessGen = S.sessionGen || 0, reqTok = token;
+  if (!targetCls || !reqTok) return;
+  if (S.boardLoadedCls !== targetCls) return toast('当前班级设置尚未加载完成，请稍候再保存');
   const plan = readPlan(); if (!plan) return;
-  try { await api('/api/settings', { class: S.cls, countdowns: readCd(), eve_plan: plan,
-      standby: { enabled: $('#sbOn').checked, idle_minutes: S.sbIdle, mode: S.sbMode }, screen_font: S.sfont, board_points: $('#sbStars').checked, tools_tab: $('#sbTools').checked, desk_board: $('#sbDesk').checked,
-      quotes: { enabled: $('#qtOn').checked, builtin: $('#qtBuiltin').checked, custom: $('#qtCustom').value.split('\n') }, prep: prepBody() }); toast('已保存 ✓'); loadBoard(); }
-  catch (e) { toast(e.message); }
+  // 进入保存即一次性快照锁定班级、登录会话、作息内容与全部大屏表单，彻底杜绝异步中途切班串写或切账号覆盖新界面
+  const settingsPayload = {
+    class: targetCls,
+    countdowns: readCd(),
+    eve_plan: plan,
+    standby: { enabled: $('#sbOn').checked, idle_minutes: S.sbIdle, mode: S.sbMode },
+    screen_font: S.sfont,
+    board_points: $('#sbStars').checked,
+    tools_tab: $('#sbTools').checked,
+    desk_board: $('#sbDesk').checked,
+    quotes: { enabled: $('#qtOn').checked, builtin: $('#qtBuiltin').checked, custom: $('#qtCustom').value.split('\n') },
+    prep: prepBody(),
+  };
+  const curSchTxt = $('#schText') ? $('#schText').value.trim() : '';
+  const curSchDaysArr = [...(S.schDays || [])];
+  const curSchDays = JSON.stringify([...curSchDaysArr].sort());
+  const schDirty = $('#schText') && !$('#schText').disabled && S.schLoadedCls === targetCls && S.schOrig.cls === targetCls
+    && (curSchTxt !== S.schOrig.text || curSchDays !== S.schOrig.days);
+  let schSnap = null;
+  if (schDirty) {
+    const periods = parseSchPeriods();
+    if (!periods) return;
+    schSnap = {
+      scope: (S.schAdmin && !D.public && !S.schOwn) ? 'school' : 'class',
+      targetCls, sessGen, reqTok, periods, weekdays: curSchDaysArr,
+      rawText: curSchTxt, daysKey: curSchDays, custom: [...(S.schCustomClasses || [])],
+    };
+  }
+  S.bdSaving = true; syncBoardSaveBtns();
+  let schSaved = false;
+  try {
+    if (schSnap) {
+      const sr = await saveScheduleScope(schSnap.scope, schSnap);
+      if (!sr || !sr.ok) return;
+      schSaved = true;
+    }
+    if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+    await api('/api/settings', settingsPayload);
+    if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+    if (S.cls === targetCls) {
+      toast('已保存 ✓'); loadBoard(); refresh();
+    } else {
+      toast(`${targetCls} 设置已保存 ✓`);
+    }
+  } catch (e) {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) {
+      toast(e.message);
+      if (schSaved && S.cls === targetCls) { loadSchedule(); refresh(); }
+    }
+  } finally {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) { S.bdSaving = false; syncBoardSaveBtns(); }
+  }
 }
 
 // ---------- 班务：积分 + 值日 ----------
@@ -2122,11 +3057,18 @@ const PRESETS = [[1, '回答问题'], [1, '帮助同学'], [2, '作业优秀'], 
 const TASKS = ['', '扫地', '拖地', '擦黑板', '倒垃圾', '整理讲台', '擦窗户', '关门窗'];
 S.pSel = new Set(); S.pRange = 'week'; S.points = { week: {}, month: {}, all: {}, events: [] }; S.duty = {}; S.dutyDay = 1;
 async function loadDuty() {
+  const reqCls = S.cls, reqGen = S.sessionGen || 0, reqTok = token;
+  const seq = (S.dutySeq = (S.dutySeq || 0) + 1);
   $('#pPresets').innerHTML = PRESETS.map(([d, r]) => `<button class="chip preset ${d > 0 ? 'plus' : 'minus'}" data-preset-pt="${d}|${r}">${d > 0 ? '+' + d : d} ${r}</button>`).join('');
+  let pts, st;
   try {
-    const [pts, st] = await Promise.all([api('/api/points?class=' + encodeURIComponent(S.cls)), api('/api/settings')]);
-    S.points = pts; S.settings = st; S.duty = JSON.parse(JSON.stringify((st.duty || {})[S.cls] || {}));
+    [pts, st] = await Promise.all([
+      api('/api/points?class=' + encodeURIComponent(reqCls)),
+      api('/api/settings?class=' + encodeURIComponent(reqCls)),
+    ]);
   } catch { return; }
+  if (seq !== S.dutySeq || reqCls !== S.cls || reqGen !== (S.sessionGen || 0) || reqTok !== token) return;
+  S.points = pts; S.settings = st; S.duty = JSON.parse(JSON.stringify((st.duty || {})[reqCls] || {}));
   if (!S.dutyDayPicked) S.dutyDay = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(new Date().toLocaleDateString('en-US', { ...BJ, weekday: 'short' })) + 1 || 1;
   renderPoints(); renderDuty(); loadAttend();
 }
@@ -2329,6 +3271,8 @@ function fillClassSelect() {
 }
 async function openClasses() {
   try { S.roster = await api('/api/roster'); } catch { return; }
+  S.bu = { set: new Set(), filter: '', targets: [], busy: false };
+  if ($('#bulkUnBox')) $('#bulkUnBox').open = false;
   $('#classMask').classList.remove('hidden');
   renderClasses();
   editClass(S.clsEdit && S.roster.classes.some(c => c.name === S.clsEdit) ? S.clsEdit : (S.roster.admin ? null : S.roster.classes[0]?.name));
@@ -2348,6 +3292,80 @@ function renderClasses() {
     ${S.roster.admin ? `<button class="btn ghost sm" data-clsdel="${esc(c.name)}">${ic('trash', 'sm')}</button>` : ''}</div>`;
   }).join('') || empty('还没有班级');
   renderVoi();
+  renderBulkUn();
+}
+S.bu = { set: new Set(), filter: '', targets: [] };
+function renderBulkUnListOnly() {
+  const box = $('#bulkUnBody'), listEl = box && box.querySelector('.bc-list');
+  if (!listEl || !S.roster) return renderBulkUn();
+  const all = S.roster.classes.map(c => c.name), q = (S.bu.filter || '').trim().toLowerCase();
+  const shown = q ? all.filter(c => c.toLowerCase().includes(q)) : all;
+  listEl.innerHTML = shown.map(c => `<button type="button" class="chip ${S.bu.set.has(c) ? 'on' : ''}" data-bucls="${esc(c)}"><span class="dot ${S.roster.online[c] ? 'on' : ''}"></span>${esc(c)}</button>`).join('') || '<span class="me">没有匹配的班级</span>';
+}
+function renderBulkUn() {
+  const show = !!(S.roster && S.roster.admin && !S.roster.public && S.roster.classes.length > 0);
+  $('#bulkUnBox').classList.toggle('hidden', !show);
+  if (!show) return;
+  const all = S.roster.classes.map(c => c.name), valid = new Set(all);
+  S.bu.set = new Set([...S.bu.set].filter(c => valid.has(c)));
+  const sel = all.filter(c => S.bu.set.has(c));
+  const onCnt = sel.filter(c => S.roster.online[c]).length, offCnt = sel.length - onCnt;
+  const allOn = all.length > 0 && sel.length === all.length;
+  const pend = S.roster.pending_uninstall || [];
+  $('#bulkUnBadge').textContent = (pend.length ? `待卸载 ${pend.length} 班 · ` : '') + '展开 ▾';
+  const groups = bcGradeGroups(all);
+  const grpBtns = groups.map(([g, list]) => {
+    const full = list.every(c => S.bu.set.has(c));
+    return `<button type="button" class="chip ${full ? 'on' : ''}" data-bugrp="${esc(g)}">${esc(g)} (${list.length})</button>`;
+  }).join('');
+  const q = (S.bu.filter || '').trim().toLowerCase();
+  const shown = q ? all.filter(c => c.toLowerCase().includes(q)) : all;
+  const oldList = $('#bulkUnBody').querySelector('.bc-list'), savedScroll = oldList ? oldList.scrollTop : 0;
+  $('#bulkUnBody').innerHTML = `
+    <div class="bc-head">
+      <div class="bc-stat" style="color:#991b1b">已选 ${sel.length} / ${all.length} 个班<small>${sel.length ? `在线 ${onCnt} 个 · 离线 ${offCnt} 个` : '点击全选或按年级勾选'}</small></div>
+      <div class="bc-acts">
+        <button type="button" class="chip ${allOn ? 'on' : ''}" data-buall="1">${allOn ? '取消全选' : `全选全部 (${all.length})`}</button>
+        ${grpBtns}
+        <button type="button" class="chip" data-buclear="1">清空</button>
+      </div>
+    </div>
+    ${all.length >= 12 ? `<input class="input bc-filter" id="bulkUnFilter" value="${esc(S.bu.filter)}" placeholder="输入关键词筛选班级，如：高三、3班…">` : ''}
+    <div class="bc-list" style="background:#fff;border:1px solid #f0dada;border-radius:14px;padding:10px">${shown.map(c => `<button type="button" class="chip ${S.bu.set.has(c) ? 'on' : ''}" data-bucls="${esc(c)}"><span class="dot ${S.roster.online[c] ? 'on' : ''}"></span>${esc(c)}</button>`).join('') || '<span class="me">没有匹配的班级</span>'}</div>
+    <div class="row" style="margin-top:12px;flex-wrap:wrap;gap:10px">
+      <button type="button" class="btn danger-solid" id="bulkUnGo" ${sel.length ? '' : 'disabled'}>远程卸载已选 ${sel.length} 个班的一体机</button>
+      <span class="me" style="white-space:normal;font-size:12.5px;color:#7f4444">只卸载教室一体机软件，不会删除班级名单、作业和历史数据</span>
+    </div>
+    ${(S.roster.old_screens || []).length ? `<div class="bu-pending" style="background:#fffbeb;border-color:#f5d79b;color:#92400e"><div><b>⏳ 旧版大屏等待自动更新：</b>${esc(S.roster.old_screens.slice(0, 6).join('、'))}${S.roster.old_screens.length > 6 ? ` 等 ${S.roster.old_screens.length} 班` : ''} 接收端尚未升级到可靠回执版，下发卸载后将保留任务并等待其自动更新，绝不提前解绑 MAC</div></div>` : ''}
+    ${pend.length ? `<div class="bu-pending"><div><b>⏳ 反悔保护：</b>还有 <b>${pend.length} 个班</b> 的卸载指令待确认/待执行（${esc(pend.slice(0, 6).join('、'))}${pend.length > 6 ? ' 等' : ''}，7 天内有效）</div>
+      <button type="button" class="btn danger sm" id="bulkUnCancelPend">撤销未确认的卸载</button></div>` : ''}`;
+  const newList = $('#bulkUnBody').querySelector('.bc-list');
+  if (newList && savedScroll) newList.scrollTop = savedScroll;
+}
+function openBulkUnConfirm() {
+  if (!S.roster) return;
+  const all = S.roster.classes.map(c => c.name);
+  const targets = all.filter(c => S.bu.set.has(c));
+  if (!targets.length) return toast('请先选择要卸载的班级');
+  S.bu.targets = targets;
+  const onCnt = targets.filter(c => S.roster.online[c]).length, offCnt = targets.length - onCnt;
+  const devs = S.roster.devices || {};
+  const macCnt = targets.filter(c => devs[c]).length;
+  const show = targets.slice(0, 15), more = targets.length - show.length;
+  $('#bulkUnConfirmBody').innerHTML = `
+    <p style="margin:0 0 10px;font-size:14px;line-height:1.6">即将向以下 <b>${targets.length} 个班</b> 下发远程卸载指令：各班一体机将自动关闭接收端、取消开机自启、删除桌面图标和程序目录。</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0">
+      <div style="padding:10px 12px;border-radius:12px;background:#f4fcf8;border:1px solid #bfead7"><div style="font-size:19px;font-weight:800;color:#0f7a53">${onCnt} 个班</div><div class="me" style="font-size:12px">当前在线 · 几秒内立即卸载</div></div>
+      <div style="padding:10px 12px;border-radius:12px;background:#fffbf0;border:1px solid #f5d79b"><div style="font-size:19px;font-weight:800;color:#b46d00">${offCnt} 个班</div><div class="me" style="font-size:12px">当前离线 · 7 天内联网自动卸载</div></div>
+    </div>
+    <div class="bc-tags">${show.map(c => `<span class="tag" style="background:#ffeded;color:#b91c1c">${esc(c)}</span>`).join('')}${more ? `<span class="tag" style="background:var(--soft);color:var(--muted)">等共 ${targets.length} 个班</span>` : ''}</div>
+    ${macCnt ? `<label style="display:flex;align-items:flex-start;gap:8px;margin-top:12px;padding:10px 12px;border-radius:12px;background:var(--soft);font-size:13px;cursor:pointer">
+      <input type="checkbox" id="bulkUnMac" style="margin-top:3px"><span>大屏联网领取卸载指令时同步清除 ${macCnt} 台大屏的 <b>VOI MAC 绑定记录</b>（默认不勾；若旧机器已报废换机不会再联网，请直接在上方 VOI 列表点解绑）</span></label>` : ''}`;
+  $('#bulkUnTyped').value = '';
+  $('#bulkUnYes').disabled = true;
+  $('#bulkUnYes').textContent = `确认卸载 ${targets.length} 个班`;
+  $('#bulkUnMask').classList.remove('hidden');
+  setTimeout(() => $('#bulkUnTyped').focus(), 50);
 }
 function renderVoi() {
   const show = !!(S.roster && S.roster.admin && !S.roster.public);
@@ -2419,7 +3437,7 @@ async function reloadClasses(select) {
   if (select) S.cls = select;
   if (!D.classes.some(c => c.name === S.cls)) S.cls = D.classes[0]?.name || '';
   if (!D.classes.length || !$('#voiceSel').options.length) {
-    S.roster = await api('/api/roster'); renderClasses(); return start();
+    S.roster = await api('/api/roster'); renderClasses(); return start(true);
   }
   fillClassSelect(); store.set('cc_cls', S.cls); renderNav(); bcSyncVisibility();
   S.roster = await api('/api/roster'); renderClasses(); go(S.view); refresh();
@@ -2427,12 +3445,12 @@ async function reloadClasses(select) {
 
 // ---------- 记录 / 状态 ----------
 function msgItem(m) {
-  const can = ['pending', 'delivered', 'scheduled'].includes(m.status);
+  const can = ['pending', 'delivered', 'scheduled'].includes(m.status) && !!m.can_recall;
   const [icon, c] = KIND[m.kind] || KIND.call;
   return `<div class="item"><span class="kind" style="background:${c}1a;color:${c}">${ic(icon)}</span><div class="main">
-    <div class="meta"><b style="color:var(--text)">${esc(m.class)}</b><span>${esc(m.time)}</span><span>${esc(m.sender)}</span>
+    <div class="meta"><b style="color:var(--text)">${esc(m.class)}</b><span>${esc(m.time)}</span><span>${esc(m.sender)}${m.mine ? '（我）' : ''}</span>
       <span class="tag st-${m.status}">${STATUS[m.status]}${m.status === 'scheduled' ? ' ' + m.deliver : ''}${m.status === 'acked' && m.ack_secs != null ? ` · ${m.ack_secs}秒` : ''}</span></div>
-    <div class="txt">${esc(m.text)}</div></div>${can ? `<button class="btn ghost sm" data-recall="${m.id}">${ic('undo', 'sm')}撤回</button>` : ''}</div>`;
+    <div class="txt">${esc(m.text)}</div></div>${can ? `<button class="btn ghost sm" data-recall="${m.id}" data-recall-mine="${m.mine ? '1' : '0'}" data-recall-sender="${esc(m.sender)}">${ic('undo', 'sm')}撤回</button>` : ''}</div>`;
 }
 S.exRange = 'week';
 function renderExport() {
@@ -2492,17 +3510,25 @@ function showTrack(m, state) {
   if (state === 'ok') trackTimer = setTimeout(() => $('#track').classList.add('hidden'), 9000);
 }
 function trackMessages(list) {
-  if (!S.seen) { S.seen = new Set(list.map(m => m.id)); return; }  // 打开页面前的旧消息不提醒
+  if (!S.mySentIds) S.mySentIds = new Set();
+  if (!S.seen) {
+    const oldList = list.filter(m => !S.mySentIds.has(m.id));
+    S.seen = new Set(oldList.map(m => m.id));
+    S.seenMaxId = Math.max(0, ...oldList.map(m => m.id));
+    if (!S.mySentIds.size) return;  // 打开页面前的旧消息不提醒；若首次刷新前刚发出新消息则继续追踪
+  }
   let beeped = false;
   list.slice().reverse().forEach(m => {
-    if (m.sender !== me || !TRACK_KINDS.includes(m.kind) || S.seen.has(m.id)) return;
+    const mine = m.notify_mine === true;  // 严格只对本账号在当前设备主动发出的消息弹送达通知，彻底杜绝串人
+    if (!mine || !TRACK_KINDS.includes(m.kind) || S.seen.has(m.id)) return;
+    if (m.id <= (S.seenMaxId || 0) && !S.trk[m.id] && !S.mySentIds.has(m.id)) return;  // 切班拉出几天前的历史旧消息绝不重弹回执
     const prev = S.trk[m.id];
     if (prev !== m.status) {
       S.trk[m.id] = m.status;
       if (m.status === 'acked') { showTrack(m, 'ok'); if (!beeped) { beep(); beeped = true; try { navigator.vibrate && navigator.vibrate([60, 40, 60]); } catch {} } }
       else if (m.status === 'delivered') showTrack(m, 'sent');
       else if (m.status === 'pending') showTrack(m, S.online[m.class] === false ? 'off' : 'wait');
-      else if (m.status === 'scheduled') { S.trackId === m.id && $('#track').classList.add('hidden'); }
+      else if (['scheduled', 'recalled', 'expired'].includes(m.status)) { S.trackId === m.id && $('#track').classList.add('hidden'); }
     } else if (m.status === 'delivered' && m.delivered_ago >= 180 && !S.warned.has(m.id)) {
       S.warned.add(m.id); showTrack(m, 'warn'); if (!beeped) { beep(); beeped = true; }
     }
@@ -2510,8 +3536,11 @@ function trackMessages(list) {
 }
 async function refresh() {
   if (!token || $('#appView').classList.contains('hidden')) return;
+  const seq = S.refreshSeq = (S.refreshSeq || 0) + 1, reqCls = S.cls, reqTok = token;
   try {
     const r = await api('/api/recent?class=' + encodeURIComponent(S.cls));
+    if (seq <= (S.refreshApplied || 0) || reqCls !== S.cls || reqTok !== token) return;
+    S.refreshApplied = seq;
     const changed = JSON.stringify([r.online[S.cls], r.period, r.exam]) !== JSON.stringify([S.online[S.cls], S.period, S.exam]);
     S.online = r.online; S.recent = r.messages; S.period = r.period; S.exam = r.exam;
     bcUpdateDots();
@@ -2530,7 +3559,7 @@ async function refresh() {
 // ---------- 事件 ----------
 $('#lgBtn').onclick = login;
 $('#lgPwd').onkeydown = e => { if (e.key === 'Enter') login(); };
-$('#logoutBtn').onclick = async () => { try { await api('/api/logout', {}); } catch {} token = ''; store.set('cc_token', ''); showLogin(); };
+$('#logoutBtn').onclick = () => { const oldTok = token; token = ''; store.set('cc_token', ''); resetSessionState(); showLogin(); if (oldTok) fetch('/api/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + oldTok, 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {}); };
 document.addEventListener('click', async e => {
   const t = e.target;
   const g = t.closest('[data-go]'); if (g) return go(g.dataset.go);
@@ -2556,9 +3585,9 @@ document.addEventListener('click', async e => {
   const md = t.closest('[data-mrday]'); if (md) { S.mrDay = +md.dataset.mrday; return loadMorning(); }
   const ms = t.closest('[data-mrsubj]'); if (ms) { S.mrSubject = ms.dataset.mrsubj; $$('[data-mrsubj]').forEach(b => b.classList.toggle('on', b === ms)); return; }
   const exc = t.closest('[data-excls]'); if (exc) { const c = exc.dataset.excls; S.exClasses.has(c) ? S.exClasses.delete(c) : S.exClasses.add(c); exc.classList.toggle('on', S.exClasses.has(c)); return; }
-  const exRowDel = t.closest('[data-exdelrow]'); if (exRowDel) { exRowDel.closest('.exrow').remove(); return; }
+  const exRowDel = t.closest('[data-exdelrow]'); if (exRowDel) { const row = exRowDel.closest('.exrow'); if (row.dataset.playingNow === '1') S.exDeletedPlaying = true; row._upSeq = (row._upSeq || 0) + 1; if (row._xhr) { try { row._xhr.abort(); } catch {} row._xhr = null; } if (S.exUploadRow === row) S.exUploadRow = null; row.remove(); return; }
   const exe = t.closest('[data-exedit]'); if (exe) { openExamForm(S.exams.find(e => e.id === +exe.dataset.exedit)); return; }
-  const exd = t.closest('[data-exdel]'); if (exd) { if (!confirm('删除这个考试安排？')) return; try { await api('/api/exams/delete', { id: +exd.dataset.exdel }); loadExamBoard(); } catch (err) { toast(err.message); } return; }
+  const exd = t.closest('[data-exdel]'); if (exd) { if (!confirm('删除这个考试安排？')) return; const eid = +exd.dataset.exdel; try { await api('/api/exams/delete', { id: eid }); clearExamTargets(eid); loadExamBoard(); } catch (err) { toast(err.message); } return; }
   const exn = t.closest('[data-exend]'); if (exn) { if (!confirm('提前结束这一场？大屏会马上收起考试画面。')) return;
     const [id, idx] = exn.dataset.exend.split(':').map(Number); try { await api('/api/exams/end', { id, idx, class: S.cls }); toast('已结束，大屏几秒内收起'); if (S.exams) loadExamBoard(); refresh(); } catch (err) { toast(err.message); } return; }
   const mdel = t.closest('[data-mrdel]'); if (mdel) { if (!confirm('删除这条早读内容？')) return; try { await api('/api/morning/delete', { id: +mdel.dataset.mrdel }); loadMorning(); } catch (err) { toast(err.message); } return; }
@@ -2646,7 +3675,87 @@ document.addEventListener('click', async e => {
     return;
   }
   const rc = t.closest('[data-recall]');
-  if (rc) { if (!confirm('撤回这条消息？教室大屏上的提示会自动关闭。')) return; try { await api('/api/recall', { id: +rc.dataset.recall }); refresh(); } catch (err) { toast(err.message); } return; }
+  if (rc) {
+    const mine = rc.dataset.recallMine !== '0', snd = rc.dataset.recallSender || '其他老师';
+    const q = mine ? '撤回这条消息？教室大屏上的提示会自动关闭。' : `这是「${snd}」发的消息，确定代为撤回吗？\n教室大屏上的提示会自动关闭。`;
+    if (!confirm(q)) return;
+    try { await api('/api/recall', { id: +rc.dataset.recall }); refresh(); } catch (err) { toast(err.message); }
+    return;
+  }
+  const exadd = t.closest('[data-exaddaudio]');
+  if (exadd) { S.exUploadRow = exadd.closest('.exrow'); $('#exAudioInput').value = ''; $('#exAudioInput').click(); return; }
+  const exrm = t.closest('[data-exrmaudio]');
+  if (exrm) { const row = exrm.closest('.exrow'); if (row._xhr) { try { row._xhr.abort(); } catch {} row._xhr = null; } row._upSeq = (row._upSeq || 0) + 1; const pr = row.querySelector('.ex-audio-prog'); if (pr) pr.classList.add('hidden'); row.dataset.audioId = ''; row.dataset.audioName = ''; row.dataset.audioSize = '0'; row.dataset.audioDur = '0'; row.dataset.audioSha = ''; row.dataset.audioStart = ''; renderExRowAudioHtml(row); return; }
+  const exear = t.closest('[data-exearly]');
+  if (exear) {
+    const row = exear.closest('.exrow'), sv = row.querySelector('[data-k="start"]')?.value || '';
+    if (!sv) return toast('请先填写这一场的开考时间');
+    row.dataset.audioStart = shiftHm(sv, -(+exear.dataset.exearly));
+    renderExRowAudioHtml(row); return;
+  }
+  const exref = t.closest('[data-exrefresh]'); if (exref) { loadExamBoard(); toast('已刷新各班缓存状态'); return; }
+  const exta = t.closest('[data-extgtall]');
+  if (exta) {
+    const key = exta.dataset.extgtall, [eid, idx] = key.split(':').map(Number);
+    const e = (S.exams || []).find(x => x.id === eid), sess = e && e.sessions.find(x => x.idx === idx);
+    if (sess && sess.audio_status) { S.exTargetsManual[key] = true; S.exTargets[key] = new Set(sess.audio_status.classes.filter(c => c.status === 'ready').map(c => c.class)); renderExamList(); }
+    return;
+  }
+  const extg = t.closest('[data-extgt]');
+  if (extg) {
+    const key = extg.dataset.extgt, c = extg.dataset.excls2;
+    S.exTargetsManual[key] = true;
+    const set = S.exTargets[key] || (S.exTargets[key] = new Set());
+    set.has(c) ? set.delete(c) : set.add(c);
+    renderExamList(); return;
+  }
+  const excmd = t.closest('[data-excmd]'); if (excmd) return sendExamAudioCmd(excmd.dataset.excmd, excmd.dataset.exkey, excmd);
+  const ltref = t.closest('[data-ltrefresh]'); if (ltref) { loadListen(); toast('已刷新各班缓存状态'); return; }
+  const ltta = t.closest('[data-lttgtall]');
+  if (ltta) {
+    const id = +ltta.dataset.lttgtall, it = (S.ltItems || []).find(x => x.id === id), key = 'lt_' + id;
+    if (it && it.audio_status) { S.ltTargetsManual[key] = true; S.ltTargets[key] = new Set(it.audio_status.classes.filter(c => c.status === 'ready').map(c => c.class)); renderListenList(); }
+    return;
+  }
+  const lttg = t.closest('[data-lttgt]');
+  if (lttg) {
+    const id = +lttg.dataset.lttgt, c = lttg.dataset.ltcls, key = 'lt_' + id;
+    S.ltTargetsManual[key] = true;
+    const set = S.ltTargets[key] || (S.ltTargets[key] = new Set());
+    set.has(c) ? set.delete(c) : set.add(c);
+    renderListenList(); return;
+  }
+  const ltcmd = t.closest('[data-ltcmd]'); if (ltcmd) return sendListenCmd(ltcmd.dataset.ltcmd, +ltcmd.dataset.ltid, ltcmd);
+  const ltdel = t.closest('[data-ltdel]');
+  if (ltdel) { if (!confirm('删除这条听力任务？')) return; const id = +ltdel.dataset.ltdel; try { await api('/api/listen/delete', { id }); delete S.ltTargets['lt_' + id]; delete S.ltTargetsManual['lt_' + id]; loadListen(); } catch (err) { toast(err.message); } return; }
+  if (t.closest('#ltClearAudio')) {
+    if (S.ltSaving) return;
+    if (S.ltXhr) { try { S.ltXhr.abort(); } catch {} S.ltXhr = null; }
+    S.ltUpSeq = (S.ltUpSeq || 0) + 1; S.ltDraftSeq = (S.ltDraftSeq || 0) + 1; $('#ltProg').classList.add('hidden');
+    if (S.ltAutoTitle && $('#ltTitle').value.trim() === S.ltAutoTitle) $('#ltTitle').value = '';
+    S.ltAutoTitle = ''; S.ltAudio = null; $('#ltPicked').classList.add('hidden'); $('#ltPicked').innerHTML = ''; bcSyncActionUI('listen'); return;
+  }
+  if (t.closest('[data-scphone]')) { store.set('cc_sc_tip_done', '1'); syncShortcutTip(); return; }
+  const scdl = t.closest('[data-scurl]'); if (scdl) return downloadUrlShortcut(scdl.dataset.scurl, scdl.dataset.scpure === '1');
+  const buc = t.closest('[data-bucls]');
+  if (buc) { const c = buc.dataset.bucls; S.bu.set.has(c) ? S.bu.set.delete(c) : S.bu.set.add(c); return renderBulkUn(); }
+  const bua = t.closest('[data-buall]');
+  if (bua && S.roster) { const all = S.roster.classes.map(c => c.name); S.bu.set = S.bu.set.size === all.length ? new Set() : new Set(all); return renderBulkUn(); }
+  const bug = t.closest('[data-bugrp]');
+  if (bug && S.roster) {
+    const all = S.roster.classes.map(c => c.name), list = (bcGradeGroups(all).find(x => x[0] === bug.dataset.bugrp) || [, []])[1];
+    const full = list.length && list.every(c => S.bu.set.has(c));
+    list.forEach(c => full ? S.bu.set.delete(c) : S.bu.set.add(c));
+    return renderBulkUn();
+  }
+  const buclr = t.closest('[data-buclear]'); if (buclr) { S.bu.set = new Set(); return renderBulkUn(); }
+  if (t.closest('#bulkUnGo')) return openBulkUnConfirm();
+  if (t.closest('#bulkUnCancelPend')) {
+    if (!confirm('撤销所有尚未送达（离线等待中）的卸载指令？\n已经在线卸载的一体机不受影响。')) return;
+    try { const r = await api('/api/classroom/uninstall/cancel', {}); S.roster = await api('/api/roster'); renderClasses(); toast(`已撤销 ${r.cancelled} 条待执行的卸载指令 ✓`); }
+    catch (err) { toast(err.message); }
+    return;
+  }
   const bcc = t.closest('[data-bccls]');
   if (bcc) { const sc = bcc.dataset.bccls, c = bcc.dataset.cls, st = S.bc[sc]; st.set.has(c) ? st.set.delete(c) : st.set.add(c); return renderBc(sc); }
   const bca = t.closest('[data-bcall]');
@@ -2665,16 +3774,48 @@ document.addEventListener('click', async e => {
 document.addEventListener('change', async e => {
   const dt = e.target.closest('[data-dutytask]'); if (dt) { (S.duty[String(S.dutyDay)] || [])[+dt.dataset.dutytask].task = dt.value; return; }
   const tg = e.target.closest('[data-togglerem]');
-  if (tg) { const r = remItems.find(x => x.id === +tg.dataset.togglerem); try { await api('/api/reminders/save', { ...r, enabled: tg.checked }); loadReminders(); } catch (err) { toast(err.message); } }
+  if (tg) { const r = remItems.find(x => x.id === +tg.dataset.togglerem); try { await api('/api/reminders/save', { ...r, enabled: tg.checked }); loadReminders(); } catch (err) { toast(err.message); } return; }
+  const exr = e.target.closest('#examRows .exrow');
+  if (exr && e.target.dataset.k === 'audio_start') {
+    exr.dataset.audioStart = e.target.value;
+    syncExEarlyChips(exr);
+  } else if (exr && e.target.dataset.k === 'start') {
+    const newStart = e.target.value, oldPrev = exr.dataset.prevStart || '';
+    if (exr.dataset.audioId) {
+      if (!exr.dataset.audioStart) exr.dataset.audioStart = newStart;
+      else if (hmToMin(oldPrev) != null && hmToMin(exr.dataset.audioStart) != null && hmToMin(newStart) != null) {
+        const oldDiff = hmToMin(oldPrev) - hmToMin(exr.dataset.audioStart);
+        if (oldDiff >= 0 && oldDiff <= S.exAudioEarly) exr.dataset.audioStart = shiftHm(newStart, -oldDiff);
+      }
+      exr.dataset.prevStart = newStart;
+      renderExRowAudioHtml(exr);
+    } else {
+      exr.dataset.prevStart = newStart;
+    }
+  }
 });
 document.addEventListener('input', e => {
   if (e.target.id === 'hwMinCustom') syncChips();
   if (e.target.closest('#cdRows')) renderBoardPreview();
+  if (e.target.id === 'bulkUnFilter') { S.bu.filter = e.target.value; renderBulkUnListOnly(); }
+  if (e.target.id === 'bulkUnTyped') $('#bulkUnYes').disabled = S.bu.busy || e.target.value.trim() !== '确认卸载';
   if (e.target.dataset && e.target.dataset.bcfilter) { const sc = e.target.dataset.bcfilter; S.bc[sc].filter = e.target.value; renderBcListOnly(sc); }
 });
 $('#clsSel').onchange = () => {
   if ($('#clsSel').value === '__manage__') { $('#clsSel').value = S.cls; return openClasses(); }
-  if ($('#clsSel').value === '__register__') { $('#clsSel').value = S.cls; location.href = '/register'; return; } S.cls = $('#clsSel').value; if (S.hwEdit) editHomework(null); if (S.ntEdit) editNote(null); renderNav(); store.set('cc_cls', S.cls); S.student = null; go(S.view); refresh(); };
+  if ($('#clsSel').value === '__register__') { $('#clsSel').value = S.cls; location.href = '/register'; return; }
+  S.cls = $('#clsSel').value;
+  // 切班立刻清空旧班听力/考试列表、上课状态和大屏/作息加载就绪标记，杜绝弱网/失败时误点旧班试音或把旧表单串写进新班
+  S.ltItems = []; S.exams = []; S.period = null; S.exam = null;
+  S.boardLoadedCls = ''; S.schLoadedCls = ''; S.schOrig = { cls: '', text: '', days: '' };
+  if ($('#schReset')) $('#schReset').classList.add('hidden');
+  syncBoardSaveBtns();
+  if ($('#ltList')) $('#ltList').innerHTML = '<div class="me" style="padding:4px 0">正在加载本班听力列表…</div>';
+  if ($('#examList')) $('#examList').innerHTML = '<div class="me" style="padding:4px 0">正在加载本班考试安排…</div>';
+  if ($('#period')) { $('#period').textContent = '切换班级中…'; $('#period').classList.remove('in-class'); }
+  if (S.hwEdit) editHomework(null); if (S.ntEdit) editNote(null);
+  renderNav(); store.set('cc_cls', S.cls); S.student = null; go(S.view); refresh();
+};
 let qTimer;
 $('#qText').addEventListener('input', () => { clearTimeout(qTimer); qTimer = setTimeout(quickParse, 350); });
 const quickGo = () => { if (S.sending) return; clearTimeout(qTimer); quickParse(); if (atTime() && S.remDays.length) return saveTimed(); if (S.intent && !['call', 'notice'].includes(S.intent.type)) return runIntent(); if (!$('#sendBtn').disabled) send(); };
@@ -2700,17 +3841,76 @@ $('#savePhrase').onclick = async () => {
 $('#sendBtn').onclick = () => send();
 $('#fontBtn').onclick = openFonts;
 $('#track').onclick = e => { if (e.target.id === 'trackX') { $('#track').classList.add('hidden'); return; } go('log'); };
+$('#scTipGo').onclick = () => $('#meBtn').click();
+$('#scTipClose').onclick = () => { store.set('cc_sc_tip_done', '1'); syncShortcutTip(); };
+$('#exAudioInput').onchange = e => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (f && S.exUploadRow && S.exUploadRow.isConnected) uploadExamAudioForRow(S.exUploadRow, f);
+};
+$('#bulkUnNo').onclick = () => $('#bulkUnMask').classList.add('hidden');
+$('#bulkUnYes').onclick = async () => {
+  if (S.bu.busy || $('#bulkUnTyped').value.trim() !== '确认卸载' || !S.bu.targets.length) return;
+  const unbindMac = !!($('#bulkUnMac') && $('#bulkUnMac').checked);
+  const targets = [...S.bu.targets], sessGen = S.sessionGen || 0, reqTok = token;
+  S.bu.busy = true;
+  $('#bulkUnYes').disabled = true;
+  try {
+    const r = await api('/api/classroom/uninstall', { classes: targets, unbind_mac: unbindMac });
+    if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+    $('#bulkUnMask').classList.add('hidden');
+    S.bu.set = new Set();
+    if (S.roster) {
+      if (Array.isArray(r.pending_uninstall)) S.roster.pending_uninstall = r.pending_uninstall;
+      if (Array.isArray(r.old_screens)) S.roster.old_screens = r.old_screens;
+    }
+    renderBulkUn();
+    toast(`已向 ${r.count} 个班下发卸载指令（在线 ${r.online_count} 班几秒内卸载，离线 ${r.offline_count} 班 7 天内联网自动卸载）`);
+    try {
+      const ros = await api('/api/roster');
+      if ((S.sessionGen || 0) === sessGen && token === reqTok) { S.roster = ros; renderClasses(); }
+    } catch {}
+  } catch (err) {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) {
+      $('#bulkUnYes').disabled = $('#bulkUnTyped').value.trim() !== '确认卸载';
+      toast(err.message);
+    }
+  } finally {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) S.bu.busy = false;
+  }
+};
 $('#meBtn').onclick = async () => {
   let r; try { r = await api('/api/me'); } catch { return; }
   const roles = Object.entries(D.roles || {}).map(([c, ro]) => `${esc(c)}：${ro === 'head' ? '班主任' : ro === 'admin' ? '管理员' : '任课老师'}`).join('<br>');
   $('#meTitle').textContent = r.name;
-  $('#meBody').innerHTML = r.admin ? `<p class="me" style="display:block;text-align:center;white-space:normal">你是<b>管理员</b>，能看到和管理所有班级。</p>`
-    : `<p class="me" style="display:block;text-align:center;white-space:normal;line-height:1.8">${roles}</p>
-       <div style="margin-top:10px;font-weight:700">我的登录码</div><div class="me" style="display:block;text-align:center;white-space:normal;font-size:12.5px">换手机或用电脑时，扫这个码就能登录。<b>不要发给别人</b>。</div>
-       <img src="/api/qr?t=${encodeURIComponent(r.login_url)}" style="width:180px;height:180px;margin:10px auto;display:block">
-       <a class="btn primary sm" style="--acc:#16a571;display:flex;justify-content:center;text-decoration:none;margin-bottom:8px" href="${esc(r.login_url.replace('/login?', '/app?'))}">📱 添加到手机桌面</a>
-       <button class="btn soft sm" data-invcopy="${esc(r.login_url)}">复制登录链接</button>
-       <div class="me" style="display:block;text-align:center;white-space:normal;font-size:12.5px;margin-top:8px">想在电脑上用：把链接发到微信"文件传输助手"，在电脑上点开就登录了</div>`;
+  if (r.login_url) {
+    $('#meBody').innerHTML = `
+      <p class="me" style="display:block;text-align:center;white-space:normal;line-height:1.8">${r.admin ? '你是<b>管理员</b>，能看到和管理全部班级。' : roles}</p>
+      <div class="sc-card">
+        <div class="sc-h"><span>放到桌面，下次一点就打开</span><span class="tag" style="background:#dcf5e8;color:#0f7a53">推荐</span></div>
+        <a class="btn primary sm" data-scphone="1" style="--acc:#16a571;width:100%;padding:11px 14px;display:flex;justify-content:center;text-decoration:none" href="${esc(r.login_url.replace('/login?', '/app?'))}">📱 添加到手机桌面</a>
+        <div class="sc-wx">💡 微信里也可以点右上角 <b>···</b> 选「<b>收藏</b>」或「<b>浮窗</b>」，不用切浏览器就能随时回到工作台。</div>
+        <div class="sc-div"></div>
+        <button type="button" class="btn outline-acc sm" data-scurl="${esc(r.login_url)}" data-scpure="0" style="width:100%;padding:10px 14px">💻 下载电脑桌面快捷方式 <span style="font-size:12px;font-weight:500;color:var(--muted)">班级助手.url</span></button>
+        <div class="sc-warn"><b>⚠️ 安全提醒：</b>此快捷方式带有您的个人登录码，放桌面双击即可自动登录。<b>只放自己电脑，切勿转发给他人！</b></div>
+      </div>
+      <div class="qr-compact">
+        <img src="/api/qr?t=${encodeURIComponent(r.login_url)}" alt="我的登录码">
+        <div style="flex:1;min-width:0"><div style="font-weight:800;font-size:14px">我的登录码（换设备用）</div>
+          <div class="me" style="display:block;white-space:normal;font-size:12px;margin:3px 0 8px">换手机或电脑时扫码登录，不要发给别人</div>
+          <button type="button" class="btn soft sm" data-invcopy="${esc(r.login_url)}">复制登录链接</button></div>
+      </div>`;
+  } else {
+    const pureUrl = r.base_url || (location.origin + '/');
+    $('#meBody').innerHTML = `
+      <p class="me" style="display:block;text-align:center;white-space:normal">你是<b>管理员</b>，能看到和管理所有班级。</p>
+      <div class="sc-card adm">
+        <div class="sc-h"><span>电脑桌面快捷方式</span><span class="tag" style="background:#e2eefc;color:#1d4f80">纯网址版</span></div>
+        <button type="button" class="btn primary sm" data-scurl="${esc(pureUrl)}" data-scpure="1" style="width:100%;padding:11px 14px;background:#1d6fa5;box-shadow:0 6px 16px rgba(29,111,165,.2)">💻 下载电脑桌面快捷方式</button>
+        <div class="sc-safe"><b>🔒 不含管理员密码：</b>下载的 <code>班级助手.url</code> 只保存工作台网址，双击打开浏览器即可进入（本机已登录状态下会自动保持登录，换电脑再输密码）。</div>
+        <div class="sc-div" style="border-color:#d4e3f5"></div>
+        <div style="font-size:12.5px;color:#54697d;line-height:1.6">📱 手机上用管理员账号时，可用浏览器「添加到主屏幕」保存当前网址；日常发消息更推荐给自己的老师账号设为管理员，扫码更方便。</div>
+      </div>`;
+  }
   $('#meMask').classList.remove('hidden');
 };
 $('#meClose').onclick = () => $('#meMask').classList.add('hidden');
@@ -2876,6 +4076,7 @@ $('#clsRemoteUn').onclick = async () => {
   try {
     const r = await api('/api/classroom/uninstall', { class: name });
     toast(r.online ? '已发送，一体机几秒内就会卸载' : '已发送：一体机现在不在线，下次开机联网时自动卸载（7 天内有效）');
+    try { S.roster = await api('/api/roster'); renderClasses(); } catch {}
   } catch (err) { toast(err.message); }
 };
 $('#clsCopy').onclick = async () => {
@@ -2927,6 +4128,17 @@ $('#pApply').onclick = applyPoints;
 $('#pClear').onclick = () => { S.pSel.clear(); renderPoints(); };
 ['#pDelta', '#pReason'].forEach(x => $(x).addEventListener('input', renderPoints));
 $('#dutySave').onclick = saveDuty;
+$('#ltFile').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) uploadListenAudio(f); };
+$('#ltTimed').onchange = () => {
+  const on = $('#ltTimed').checked;
+  $('#ltTime').classList.toggle('hidden', !on);
+  if (on && !$('#ltTime').value) {
+    const m = Math.ceil((Date.now() / 60000 + 8 * 60 + 10) / 5) * 5 % 1440;
+    $('#ltTime').value = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  }
+  $('#ltModeHint').textContent = on ? '到设定时间后各班自动同步起播（误差 < 1 秒），大屏右下角出浮条不挡课件' : '不定时则保存后先后台缓存，随时点下方「立即播放」';
+};
+$('#ltSave').onclick = saveListenTask;
 $('#fileInput').onchange = e => { const f = e.target.files[0]; if (f) uploadFile(f); e.target.value = ''; };
 ['dragenter', 'dragover'].forEach(t => $('#fileDrop').addEventListener(t, e => { e.preventDefault(); $('#fileDrop').style.borderColor = 'var(--acc,#16a571)'; }));
 $('#fileDrop').addEventListener('dragleave', () => { $('#fileDrop').style.borderColor = ''; });
@@ -2951,9 +4163,14 @@ $('#dutyAuto').onclick = () => {
 };
 $('#dutyPush').onclick = async () => { try { await api('/api/duty/push', { class: S.cls, ...voiceOpts() }); toast('已推送今日值日 ✓'); } catch (e) { toast(e.message); } };
 async function saveCd() {  // 倒计时改完就保存（原来要拉到页面最底下点"保存"，老师常常找不到）
+  const targetCls = S.cls, sessGen = S.sessionGen || 0, reqTok = token;
+  if (S.boardLoadedCls !== targetCls) return;
   const l = readCd();
   if (l.some(c => !c.name !== !c.date)) return;  // 名称和日期只填了一个：等填完再存
-  try { await api('/api/settings', { class: S.cls, countdowns: l }); toast('倒计时已保存 ✓'); } catch (e) { toast(e.message); }
+  try {
+    await api('/api/settings', { class: targetCls, countdowns: l });
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) toast('倒计时已保存 ✓');
+  } catch (e) { if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(e.message); }
 }
 $('#cdRows').addEventListener('change', () => { renderBoardPreview(); saveCd(); });
 $('#cdAdd').onclick = () => { const l = readCd(); if (l.length >= 4) return toast('最多 4 个'); l.push({ name: '', date: '' }); renderCd(l); };
@@ -2964,12 +4181,26 @@ function prepBody() {  // 课前准备提醒的设置：「保存提醒设置」
   return { enabled: $('#prOn').checked, voice: $('#prVoice').checked, after: S.prLead, default: $('#prDefault').value.trim(), items };
 }
 $('#prSave').onclick = async () => {
-  try { await api('/api/settings', { class: S.cls, prep: prepBody() }); toast('课前准备提醒已保存 ✓'); } catch (e) { toast(e.message); }
+  const targetCls = S.cls, sessGen = S.sessionGen || 0, reqTok = token;
+  if (S.boardLoadedCls !== targetCls) return toast('当前班级设置尚未加载完成，请稍候');
+  const body = prepBody();
+  try {
+    await api('/api/settings', { class: targetCls, prep: body });
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) toast('课前准备提醒已保存 ✓');
+  } catch (e) { if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(e.message); }
 };
 ['#prOn', '#prVoice'].forEach(x => $(x).addEventListener('change', async () => {  // 开关一拨就保存，不用再找按钮
-  try { await api('/api/settings', { class: S.cls, prep: prepBody() });
-    toast(x === '#prOn' ? ($('#prOn').checked ? '已开启课前准备提醒 ✓' : '已关闭课前准备提醒 ✓') : ($('#prVoice').checked ? '课前提醒会语音播报 ✓' : '课前提醒不再语音播报 ✓')); }
-  catch (e) { toast(e.message); }
+  const targetCls = S.cls, sessGen = S.sessionGen || 0, reqTok = token, val = $(x).checked;
+  if (S.boardLoadedCls !== targetCls) { $(x).checked = !val; return toast('当前班级设置尚未加载完成，请稍候'); }
+  const body = prepBody();
+  try {
+    await api('/api/settings', { class: targetCls, prep: body });
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) {
+      toast(x === '#prOn' ? (val ? '已开启课前准备提醒 ✓' : '已关闭课前准备提醒 ✓') : (val ? '课前提醒会语音播报 ✓' : '课前提醒不再语音播报 ✓'));
+    }
+  } catch (e) {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) { if (S.cls === targetCls) $(x).checked = !val; toast(e.message); }
+  }
 }));
 $('#sjChips').onclick = e => {
   const b = e.target.closest('[data-sj]'); if (!b) return;
@@ -2985,37 +4216,69 @@ $('#sjAdd').onclick = () => {
 };
 $('#sjNew').onkeydown = e => { if (e.key === 'Enter') $('#sjAdd').click(); };
 $('#sjSave').onclick = async () => {
-  if (!S.sjOn.length) return toast('至少选一个科目');
+  const targetCls = S.cls, sessGen = S.sessionGen || 0, reqTok = token;
+  if (S.boardLoadedCls !== targetCls) return toast('当前班级设置尚未加载完成，请稍候');
+  const subs = [...S.sjOn];
+  if (!subs.length) return toast('至少选一个科目');
   try {
-    await api('/api/settings', { class: S.cls, subjects: S.sjOn });
-    (D.class_subjects = D.class_subjects || {})[S.cls] = [...S.sjOn]; renderSubjects();
+    await api('/api/settings', { class: targetCls, subjects: subs });
+    if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+    (D.class_subjects = D.class_subjects || {})[targetCls] = subs;
+    if (S.cls === targetCls) renderSubjects();
     toast('本班科目已保存 ✓');
-  } catch (e) { toast(e.message); }
+  } catch (e) { if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(e.message); }
 };
 $('#ttSave').onclick = async () => {
+  const targetCls = S.cls, sessGen = S.sessionGen || 0, reqTok = token;
+  if (S.boardLoadedCls !== targetCls) return toast('当前班级设置尚未加载完成，请稍候');
   const tt = {};
   $$('[data-tt]').forEach(el => { const [d, i] = el.dataset.tt.split('-').map(Number); (tt[d] = tt[d] || [])[i] = { subject: el.value.trim() }; });
   Object.keys(tt).forEach(d => { tt[d] = Array.from(tt[d], x => x || { subject: '' }); });
-  try { await api('/api/settings', { class: S.cls, timetable: tt }); toast('课程表已保存 ✓'); } catch (e) { toast(e.message); }
+  try {
+    await api('/api/settings', { class: targetCls, timetable: tt });
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) toast('课程表已保存 ✓');
+  } catch (e) { if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(e.message); }
 };
 $('#schSave').onclick = async () => {
-  const periods = $('#schText').value.split('\n').map(l => l.trim()).filter(Boolean).map(l => l.replace(/[：:]/g, ':').split(/\s*[-—–~～至到]\s*/));
-  try { const r = await api('/api/schedule', { scope: 'class', class: S.cls, periods, weekdays: S.schDays }); toast(`已保存为${S.cls}的作息：${r.periods.length} 节课`); D.no_schedule = (D.no_schedule || []).filter(c => c !== S.cls); renderNav(); loadBoard(); refresh(); } catch (e) { toast(e.message); }
+  const r = await saveScheduleScope('class');
+  if (r && r.ok && r.sameClass) { loadBoard(); refresh(); }
 };
 $('#schSaveSchool').onclick = async () => {
-  const periods = $('#schText').value.split('\n').map(l => l.trim()).filter(Boolean).map(l => l.replace(/[：:]/g, ':').split(/\s*[-—–~～至到]\s*/));
-  if (!confirm('保存为全校作息：所有没有单独设置作息的班都会跟着改。确定吗？')) return;
-  try { const r = await api('/api/schedule', { scope: 'school', periods, weekdays: S.schDays }); toast(`全校作息已保存：${r.periods.length} 节课`); loadBoard(); refresh(); } catch (e) { toast(e.message); }
+  const r = await saveScheduleScope('school');
+  if (r && r.ok && S.view === 'board') { loadBoard(); refresh(); }
 };
 $('#schReset').onclick = async () => {
-  if (!confirm(`${S.cls} 不再用单独作息，改回全校作息？`)) return;
-  try { await api('/api/schedule', { scope: 'class', class: S.cls, reset: true }); toast('已改回全校作息'); loadBoard(); refresh(); } catch (e) { toast(e.message); }
+  if (S.bdSaving) return;
+  const targetCls = S.cls, sessGen = S.sessionGen || 0, reqTok = token;
+  if (S.schLoadedCls !== targetCls) return toast('本班作息尚未加载完成，请稍候');
+  if (!confirm(`${targetCls} 不再用单独作息，改回全校作息？`)) return;
+  if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+  S.bdSaving = true; syncBoardSaveBtns();
+  try {
+    await api('/api/schedule', { scope: 'class', class: targetCls, reset: true });
+    if ((S.sessionGen || 0) !== sessGen || token !== reqTok) return;
+    if (S.cls === targetCls) { toast('已改回全校作息 ✓'); loadBoard(); refresh(); }
+    else toast(`${targetCls} 已改回全校作息 ✓`);
+  } catch (e) {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) toast(e.message);
+  } finally {
+    if ((S.sessionGen || 0) === sessGen && token === reqTok) { S.bdSaving = false; syncBoardSaveBtns(); }
+  }
 };
 BC_SCOPES.forEach(sc => { const cb = $(BC_EL[sc].cb); if (cb) cb.addEventListener('change', () => bcSetOn(sc, cb.checked)); });
 $('#bcConfirmNo').onclick = () => closeBcConfirm(false);
 $('#bcConfirmYes').onclick = () => closeBcConfirm(true);
 $$('.mask').forEach(m => m.addEventListener('click', e => { if (e.target === m) { if (m.id === 'bcConfirmMask') closeBcConfirm(false); else m.classList.add('hidden'); } }));  // 点弹窗外面的暗处关闭
 setInterval(refresh, 3000);
+setInterval(() => {
+  if (!token || $('#appView').classList.contains('hidden')) return;
+  if (S.view === 'board' && $('#examForm').classList.contains('hidden')
+      && (S.exams || []).some(e => (e.sessions || []).some(x => x.audio && ((x.state !== 'done' && x.state !== 'ended') || (x.audio_status && (x.audio_status.playing || []).length > 0))))) {
+    loadExamBoard(true);
+  } else if (S.view === 'tools' && (S.ltItems || []).length) {
+    loadListen(true);
+  }
+}, 5000);
 setInterval(() => { if (S.view === 'tools') tickTimer(); }, 500);
 
 if (token) start(); else showLogin();

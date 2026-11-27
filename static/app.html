@@ -59,8 +59,9 @@ async function ensureLogin() {
 
 function guide() {
   if (wechat) {
-    $('#body').innerHTML = `<div class="arrow">↗</div><h1>先换到手机浏览器</h1><p class="sub">微信里没法添加到桌面</p>
+    $('#body').innerHTML = `<div class="arrow">↗</div><h1>先换到手机浏览器</h1><p class="sub">微信里没法添加到手机桌面</p>
       <ol><li>点右上角的 <b>···</b></li><li>${ios ? '选 <b>在 Safari 中打开</b>' : '选 <b>在浏览器打开</b>'}</li><li>打开后照着页面上的提示做</li></ol>
+      <div class="note">💡 不想切浏览器？可以先点下方「<b>先不加，直接进工作台</b>」，进入工作台后再点微信右上角 <b>···</b> 选「<b>收藏</b>」或「<b>浮窗</b>」，以后一点直达工作台。</div>
       <a class="go" href="/">先不加，直接进工作台</a>`;
     return;
   }
